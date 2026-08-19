@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" xmlns:gz="http://gazebosim.org/schema">
+
+    <xacro:macro name="turtlebot_imu" params="parent_link:=base_link">
+        <link name="imu_link">
+            <visual>
+                <origin xyz="0 0 0" rpy="0 0 0" />
+                <geometry>
+                    <box size="0.035 0.025 0.012" />
+                </geometry>
+                <material name="accent_orange" />
+            </visual>
+            <inertial>
+                <origin xyz="0 0 0" />
+                <mass value="0.005" />
+                <inertia ixx="0.000001" ixy="0" ixz="0" iyy="0.000001" iyz="0" izz="0.000001" />
+            </inertial>
+        </link>
+
+        <joint name="imu_joint" type="fixed">
+            <parent link="${parent_link}" />
+            <child link="imu_link" />
+            <origin xyz="-0.032 0.0 0.076" rpy="0 0 0" />
+        </joint>
+
+        <link name="autonav_bot/imu_link/imu_sensor" />
+        <joint name="imu_gz_frame_joint" type="fixed">
+            <parent link="imu_link" />
+            <child link="autonav_bot/imu_link/imu_sensor" />
+            <origin xyz="0 0 0" rpy="0 0 0" />
+        </joint>
+
+        <gazebo reference="imu_link">
+            <material>Gazebo/Orange</material>
+            <sensor name="imu_sensor" type="imu">
+                <always_on>true</always_on>
+                <update_rate>100</update_rate>
+                <visualize>true</visualize>
+                <topic>/imu/data</topic>
+                <gz:frame_id>imu_link</gz:frame_id>
+                <imu>
+                    <angular_velocity>
+                        <x>
+                            <noise type="gaussian">
+                                <mean>0.0</mean>
+                                <stddev>2e-4</stddev>
+                            </noise>
+                        </x>
+                        <y>
+                            <noise type="gaussian">
+                                <mean>0.0</mean>
+                                <stddev>2e-4</stddev>
+                            </noise>
+                        </y>
+                        <z>
+                            <noise type="gaussian">
+                                <mean>0.0</mean>
+                                <stddev>2e-4</stddev>
+                            </noise>
+                        </z>
+                    </angular_velocity>
+                    <linear_acceleration>
+                        <x>
+                            <noise type="gaussian">
+                                <mean>0.0</mean>
+                                <stddev>1.7e-2</stddev>
+                            </noise>
+                        </x>
+                        <y>
+                            <noise type="gaussian">
+                                <mean>0.0</mean>
+                                <stddev>1.7e-2</stddev>
+                            </noise>
+                        </y>
+                        <z>
+                            <noise type="gaussian">
+                                <mean>0.0</mean>
+                                <stddev>1.7e-2</stddev>
+                            </noise>
+                        </z>
+                    </linear_acceleration>
+                </imu>
+            </sensor>
+        </gazebo>
+    </xacro:macro>
+
+</robot>

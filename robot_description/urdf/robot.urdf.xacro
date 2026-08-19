@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<robot name="autonav_bot" xmlns:xacro="http://www.ros.org/wiki/xacro" xmlns:gz="http://gazebosim.org/schema">
+
+  <!--
+    AUTONAV BOT — Main URDF Entry Point
+    Parameter:
+      lidar_mode : "2d"  → 2D LiDAR flat (default, sensor_msgs/LaserScan)
+                   "3d"  → 3D LiDAR VLP-16 style (sensor_msgs/PointCloud2)
+  -->
+  <xacro:arg name="lidar_mode" default="2d" />
+
+  <!-- Include semua komponen -->
+  <xacro:include filename="robot_core.xacro" />
+  <xacro:include filename="lidar.xacro" />
+  <xacro:include filename="lidar_3d.xacro" />
+  <xacro:include filename="imu.xacro" />
+  <xacro:include filename="depth_camera.xacro" />
+
+  <!-- Bodi utama robot -->
+  <xacro:turtlebot_core />
+
+  <!-- Pilih mode LiDAR berdasarkan argumen -->
+  <xacro:if value="${'$(arg lidar_mode)' == '2d'}">
+    <xacro:turtlebot_lidar />
+  </xacro:if>
+  <xacro:if value="${'$(arg lidar_mode)' == '3d'}">
+    <xacro:turtlebot_lidar_3d />
+  </xacro:if>
+
+  <!-- Sensor lainnya -->
+  <xacro:turtlebot_imu />
+  <xacro:turtlebot_depth_camera />
+
+</robot>

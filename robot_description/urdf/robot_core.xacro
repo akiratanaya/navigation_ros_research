@@ -1,0 +1,281 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <material name="dark_grey"><color rgba="0.20 0.21 0.23 1.0"/></material>
+    <material name="mid_grey"><color rgba="0.50 0.53 0.57 1.0"/></material>
+    <material name="light_grey"><color rgba="0.78 0.80 0.82 1.0"/></material>
+    <material name="black"><color rgba="0.05 0.05 0.05 1.0"/></material>
+    <material name="accent_orange"><color rgba="0.82 0.52 0.18 1.0"/></material>
+    <material name="green_pcb"><color rgba="0.13 0.55 0.13 1.0"/></material>
+
+    <xacro:macro name="turtlebot_core">
+        <xacro:property name="PI" value="3.1415926535897931" />
+
+        <xacro:property name="base_x" value="0.281" />
+        <xacro:property name="base_y" value="0.306" />
+        <xacro:property name="base_z" value="0.070" />
+        <xacro:property name="base_mass" value="1.80" />
+
+        <xacro:property name="wheel_radius" value="0.033" />
+        <xacro:property name="wheel_width" value="0.018" />
+        <xacro:property name="wheel_mass" value="0.05" />
+        <xacro:property name="wheel_separation" value="0.287" />
+        <xacro:property name="wheel_x_offset" value="0.0" />
+
+        <xacro:property name="caster_radius" value="0.008" />
+        <xacro:property name="caster_mass" value="0.01" />
+
+        <xacro:property name="standoff_radius" value="0.008" />
+        <xacro:property name="standoff_height" value="0.108" />
+
+        <xacro:property name="plate_x" value="0.230" />
+        <xacro:property name="plate_y" value="0.230" />
+        <xacro:property name="plate_z" value="0.006" />
+        <xacro:property name="plate_mass" value="0.15" />
+
+        <link name="base_footprint" />
+
+        <joint name="base_footprint_joint" type="fixed">
+            <parent link="base_footprint" />
+            <child link="base_link" />
+            <origin xyz="0.0 0.0 ${wheel_radius}" rpy="0 0 0" />
+        </joint>
+
+        <link name="base_link">
+            <visual>
+                <origin xyz="0.0 0.0 ${base_z/2}" rpy="0 0 0" />
+                <geometry>
+                    <box size="${base_x} ${base_y} ${base_z}" />
+                </geometry>
+                <material name="dark_grey" />
+            </visual>
+            <collision>
+                <origin xyz="0.0 0.0 ${base_z/2}" rpy="0 0 0" />
+                <geometry>
+                    <box size="${base_x} ${base_y} ${base_z}" />
+                </geometry>
+            </collision>
+            <inertial>
+                <origin xyz="0.0 0.0 ${base_z/2}" rpy="0 0 0" />
+                <mass value="${base_mass}" />
+                <inertia ixx="${(1.0/12.0)*base_mass*(base_y*base_y + base_z*base_z)}"
+                                 ixy="0.0" ixz="0.0"
+                                 iyy="${(1.0/12.0)*base_mass*(base_x*base_x + base_z*base_z)}"
+                                 iyz="0.0"
+                                 izz="${(1.0/12.0)*base_mass*(base_x*base_x + base_y*base_y)}" />
+            </inertial>
+        </link>
+
+        <xacro:macro name="wheel" params="prefix y_reflect">
+            <link name="wheel_${prefix}_link">
+                <visual>
+                    <origin xyz="0 0 0" rpy="${PI/2} 0 0" />
+                    <geometry>
+                        <cylinder radius="${wheel_radius}" length="${wheel_width}" />
+                    </geometry>
+                    <material name="black" />
+                </visual>
+                <collision>
+                    <origin xyz="0 0 0" rpy="${PI/2} 0 0" />
+                    <geometry>
+                        <cylinder radius="${wheel_radius}" length="${wheel_width}" />
+                    </geometry>
+                </collision>
+                <inertial>
+                    <origin xyz="0 0 0" />
+                    <mass value="${wheel_mass}" />
+                    <inertia ixx="${(1.0/12.0)*wheel_mass*(3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"
+                                     ixy="0" ixz="0"
+                                     iyy="${(1.0/12.0)*wheel_mass*(3*wheel_radius*wheel_radius + wheel_width*wheel_width)}"
+                                     iyz="0"
+                                     izz="${(1.0/2.0)*wheel_mass*wheel_radius*wheel_radius}" />
+                </inertial>
+            </link>
+
+            <joint name="wheel_${prefix}_joint" type="continuous">
+                <parent link="base_link" />
+                <child link="wheel_${prefix}_link" />
+                <origin xyz="${wheel_x_offset} ${y_reflect * wheel_separation/2} 0.0" rpy="0 0 0" />
+                <axis xyz="0 1 0" />
+                <dynamics damping="0.01" friction="0.1" />
+            </joint>
+        </xacro:macro>
+
+        <xacro:wheel prefix="left" y_reflect="1" />
+        <xacro:wheel prefix="right" y_reflect="-1" />
+
+        <xacro:macro name="caster" params="prefix x_offset">
+            <link name="caster_${prefix}_link">
+                <visual>
+                    <origin xyz="0 0 0" rpy="0 0 0" />
+                    <geometry>
+                        <sphere radius="${caster_radius}" />
+                    </geometry>
+                    <material name="black" />
+                </visual>
+                <collision>
+                    <origin xyz="0 0 0" rpy="0 0 0" />
+                    <geometry>
+                        <sphere radius="${caster_radius}" />
+                    </geometry>
+                    <surface>
+                        <friction>
+                            <ode>
+                                <mu>0.0</mu>
+                                <mu2>0.0</mu2>
+                            </ode>
+                        </friction>
+                    </surface>
+                </collision>
+                <inertial>
+                    <origin xyz="0 0 0" />
+                    <mass value="${caster_mass}" />
+                    <inertia ixx="${(2.0/5.0)*caster_mass*caster_radius*caster_radius}"
+                                     ixy="0" ixz="0"
+                                     iyy="${(2.0/5.0)*caster_mass*caster_radius*caster_radius}"
+                                     iyz="0"
+                                     izz="${(2.0/5.0)*caster_mass*caster_radius*caster_radius}" />
+                </inertial>
+            </link>
+
+            <joint name="caster_${prefix}_joint" type="fixed">
+                <parent link="base_link" />
+                <child link="caster_${prefix}_link" />
+                <origin xyz="${x_offset} 0.0 ${-(wheel_radius - caster_radius)}" rpy="0 0 0" />
+            </joint>
+        </xacro:macro>
+
+        <xacro:caster prefix="front" x_offset="${base_x/2 - 0.025}" />
+        <xacro:caster prefix="back" x_offset="${-(base_x/2 - 0.025)}" />
+
+        <xacro:macro name="standoff" params="prefix x_pos y_pos">
+            <link name="standoff_${prefix}_link">
+                <visual>
+                    <origin xyz="0 0 ${standoff_height/2}" rpy="0 0 0" />
+                    <geometry>
+                        <cylinder radius="${standoff_radius}" length="${standoff_height}" />
+                    </geometry>
+                    <material name="light_grey" />
+                </visual>
+                <collision>
+                    <origin xyz="0 0 ${standoff_height/2}" rpy="0 0 0" />
+                    <geometry>
+                        <cylinder radius="${standoff_radius}" length="${standoff_height}" />
+                    </geometry>
+                </collision>
+                <inertial>
+                    <origin xyz="0 0 ${standoff_height/2}" />
+                    <mass value="0.02" />
+                    <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.000001" />
+                </inertial>
+            </link>
+
+            <joint name="standoff_${prefix}_joint" type="fixed">
+                <parent link="base_link" />
+                <child link="standoff_${prefix}_link" />
+                <origin xyz="${x_pos} ${y_pos} ${base_z}" rpy="0 0 0" />
+            </joint>
+        </xacro:macro>
+
+        <xacro:standoff prefix="front_left" x_pos="${plate_x/2 - 0.015}" y_pos="${plate_y/2 - 0.015}" />
+        <xacro:standoff prefix="front_right" x_pos="${plate_x/2 - 0.015}" y_pos="${-(plate_y/2 - 0.015)}" />
+        <xacro:standoff prefix="back_left" x_pos="${-(plate_x/2 - 0.015)}" y_pos="${plate_y/2 - 0.015}" />
+        <xacro:standoff prefix="back_right" x_pos="${-(plate_x/2 - 0.015)}" y_pos="${-(plate_y/2 - 0.015)}" />
+
+        <link name="top_plate_link">
+            <visual>
+                <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+                <geometry>
+                    <box size="${plate_x} ${plate_y} ${plate_z}" />
+                </geometry>
+                <material name="green_pcb" />
+            </visual>
+            <collision>
+                <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+                <geometry>
+                    <box size="${plate_x} ${plate_y} ${plate_z}" />
+                </geometry>
+            </collision>
+            <inertial>
+                <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+                <mass value="${plate_mass}" />
+                <inertia ixx="${(1.0/12.0)*plate_mass*(plate_y*plate_y + plate_z*plate_z)}"
+                                 ixy="0.0" ixz="0.0"
+                                 iyy="${(1.0/12.0)*plate_mass*(plate_x*plate_x + plate_z*plate_z)}"
+                                 iyz="0.0"
+                                 izz="${(1.0/12.0)*plate_mass*(plate_x*plate_x + plate_y*plate_y)}" />
+            </inertial>
+        </link>
+
+        <joint name="top_plate_joint" type="fixed">
+            <parent link="base_link" />
+            <child link="top_plate_link" />
+            <origin xyz="0.0 0.0 ${base_z + standoff_height + plate_z/2}" rpy="0 0 0" />
+        </joint>
+
+        <link name="gps_link">
+            <visual>
+                <origin xyz="0 0 0" rpy="0 0 0" />
+                <geometry>
+                    <cylinder radius="0.012" length="0.010" />
+                </geometry>
+                <material name="mid_grey" />
+            </visual>
+            <inertial>
+                <origin xyz="0 0 0" />
+                <mass value="0.005" />
+                <inertia ixx="0.000001" ixy="0" ixz="0" iyy="0.000001" iyz="0" izz="0.000001" />
+            </inertial>
+        </link>
+
+        <joint name="gps_joint" type="fixed">
+            <parent link="top_plate_link" />
+            <child link="gps_link" />
+            <origin xyz="${plate_x/2 - 0.035} ${-(plate_y/2 - 0.035)} ${plate_z/2 + 0.005}" rpy="0 0 0" />
+        </joint>
+
+        <gazebo reference="base_link"><material>Gazebo/DarkGrey</material></gazebo>
+        <gazebo reference="top_plate_link"><material>Gazebo/Green</material></gazebo>
+        <gazebo reference="wheel_left_link"><material>Gazebo/FlatBlack</material></gazebo>
+        <gazebo reference="wheel_right_link"><material>Gazebo/FlatBlack</material></gazebo>
+        <gazebo reference="caster_front_link"><material>Gazebo/FlatBlack</material><mu1>0.0</mu1><mu2>0.0</mu2></gazebo>
+        <gazebo reference="caster_back_link"><material>Gazebo/FlatBlack</material><mu1>0.0</mu1><mu2>0.0</mu2></gazebo>
+
+        <gazebo>
+            <plugin
+                filename="gz-sim-diff-drive-system"
+                name="gz::sim::systems::DiffDrive">
+                <left_joint>wheel_left_joint</left_joint>
+                <right_joint>wheel_right_joint</right_joint>
+                <wheel_separation>${wheel_separation}</wheel_separation>
+                <wheel_radius>${wheel_radius}</wheel_radius>
+                <max_linear_acceleration>2.0</max_linear_acceleration>
+                <min_linear_acceleration>-2.0</min_linear_acceleration>
+                <max_angular_acceleration>4.0</max_angular_acceleration>
+                <min_angular_acceleration>-4.0</min_angular_acceleration>
+                <max_linear_velocity>1.0</max_linear_velocity>
+                <min_linear_velocity>-1.0</min_linear_velocity>
+                <max_angular_velocity>2.0</max_angular_velocity>
+                <min_angular_velocity>-2.0</min_angular_velocity>
+                <topic>/cmd_vel</topic>
+                <odom_topic>/odom</odom_topic>
+                <tf_topic>/tf</tf_topic>
+                <frame_id>odom</frame_id>
+                <child_frame_id>base_footprint</child_frame_id>
+                <odom_publish_frequency>50</odom_publish_frequency>
+            </plugin>
+        </gazebo>
+
+        <gazebo>
+            <plugin
+                filename="gz-sim-joint-state-publisher-system"
+                name="gz::sim::systems::JointStatePublisher">
+                <topic>/joint_states</topic>
+                <joint_name>wheel_left_joint</joint_name>
+                <joint_name>wheel_right_joint</joint_name>
+                <update_rate>30</update_rate>
+            </plugin>
+        </gazebo>
+    </xacro:macro>
+
+</robot>
