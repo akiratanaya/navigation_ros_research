@@ -84,7 +84,7 @@
                 <always_on>true</always_on>
                 <visualize>true</visualize>
                 <update_rate>10</update_rate>
-                <topic>/pointcloud</topic>
+                <topic>/scan</topic>
                 <gz:frame_id>lidar_3d_link</gz:frame_id>
                 <lidar>
                     <scan>

@@ -68,13 +68,11 @@ def generate_launch_description():
             '/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model',
             # TF (odom -> base_footprint dari DiffDrive Gazebo)
             '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V',
-            # ── 2D LiDAR ──────────────────────────────────────────────────
+            # ── 2D & 3D LiDAR (LaserScan) ──────────────────────────────────
             '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
-            # ── 3D LiDAR (VLP-16) ─────────────────────────────────────────
-            # PointCloud2 3D 16-channel
+            # ── 3D LiDAR (PointCloud2 16-channel) ─────────────────────────
+            '/scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
             '/pointcloud/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
-            # Proyeksi 2D LaserScan
-            '/pointcloud/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
             # ── IMU Data ───────────────────────────────────────────────────
             '/imu/data@sensor_msgs/msg/Imu[gz.msgs.IMU',
             # ── RGBD Camera ────────────────────────────────────────────────
