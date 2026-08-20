@@ -74,9 +74,7 @@
         </gazebo>
 
         <!-- ═══ GAZEBO: Sensor GPU LiDAR 3D (Velodyne VLP-16 preset) ════════
-             Horizontal : 360°  @ 1800 samples (0.2° resolusi)
-             Vertical   : 16 channel ±15° (FOV vertikal 30°)
-             Topik      : /pointcloud (PointCloudPacked) & /pointcloud/scan (LaserScan)
+             Topik Gazebo: /points (PointCloudPacked) dan /points/scan (LaserScan)
         -->
         <gazebo reference="lidar_3d_link">
             <sensor name="lidar_3d" type="gpu_lidar">
@@ -84,7 +82,7 @@
                 <always_on>true</always_on>
                 <visualize>true</visualize>
                 <update_rate>10</update_rate>
-                <topic>/scan</topic>
+                <topic>/points</topic>
                 <gz:frame_id>lidar_3d_link</gz:frame_id>
                 <lidar>
                     <scan>

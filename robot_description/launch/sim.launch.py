@@ -5,7 +5,8 @@ from launch.actions import (
     DeclareLaunchArgument, IncludeLaunchDescription,
     SetEnvironmentVariable, TimerAction
 )
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Command
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Command, EqualsSubstitution
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
@@ -44,8 +45,14 @@ def generate_launch_description():
         default_value='2d',
         description='Mode LiDAR: "2d" (LaserScan flat) atau "3d" (PointCloud2 VLP-16)'
     )
+    rviz_arg = DeclareLaunchArgument(
+        'rviz_sim',
+        default_value='true',
+        description='Buka RViz2 secara otomatis jika true'
+    )
 
     world_path = PathJoinSubstitution([pkg_path, 'worlds', LaunchConfiguration('world')])
+    rviz_config_path = os.path.join(pkg_path, 'rviz', 'sim.rviz')
 
     # 1. Gazebo Sim (Harmonic) - start pertama
     gz_sim = IncludeLaunchDescription(
@@ -53,37 +60,77 @@ def generate_launch_description():
         launch_arguments={'gz_args': ['-r ', world_path]}.items()
     )
 
-    # 2. Bridge antara ROS 2 Jazzy dan Gazebo Sim (Harmonic) - start segera setelah Gazebo
-    bridge_node = Node(
+    # 2. Bridge Dasar (selalu aktif: Clock, CmdVel, Odom, JointStates, TF, IMU, Camera)
+    base_bridge_node = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
         arguments=[
-            # Clock — paling penting, harus tersedia sebelum RSP
             '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
-            # Velocity command
             '/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
-            # Odometry
             '/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
-            # Joint States
             '/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model',
-            # TF (odom -> base_footprint dari DiffDrive Gazebo)
             '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V',
-            # ── 2D & 3D LiDAR (LaserScan) ──────────────────────────────────
-            '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
-            # ── 3D LiDAR (PointCloud2 16-channel) ─────────────────────────
-            '/scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
-            '/pointcloud/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
-            # ── IMU Data ───────────────────────────────────────────────────
             '/imu/data@sensor_msgs/msg/Imu[gz.msgs.IMU',
-            # ── RGBD Camera ────────────────────────────────────────────────
             '/camera/image@sensor_msgs/msg/Image[gz.msgs.Image',
             '/camera/depth_image@sensor_msgs/msg/Image[gz.msgs.Image',
             '/camera/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
             '/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo'
         ],
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+        output='screen'
+    )
+
+    # Bridge Mode 2D: Hanya /scan (sensor_msgs/LaserScan)
+    bridge_2d = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        arguments=[
+            '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+        ],
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+        condition=IfCondition(EqualsSubstitution(LaunchConfiguration('lidar_mode'), '2d')),
+        output='screen'
+    )
+
+    # Bridge Mode 3D: /points (PointCloud2 16-channel)
+    bridge_3d = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        arguments=[
+            '/points/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
+        ],
+        remappings=[
+            ('/points/points', '/points'),
+        ],
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+        condition=IfCondition(EqualsSubstitution(LaunchConfiguration('lidar_mode'), '3d')),
+        output='screen'
+    )
+
+    # Konversi 3D PointCloud2 ke 2D LaserScan /scan untuk SLAM dan Navigasi
+    p2l_node = Node(
+        package='pointcloud_to_laserscan',
+        executable='pointcloud_to_laserscan_node',
+        name='pointcloud_to_laserscan',
+        remappings=[
+            ('cloud_in', '/points'),
+            ('scan', '/scan'),
+        ],
         parameters=[{
+            'target_frame': 'base_footprint',
+            'transform_tolerance': 0.05,
+            'min_height': 0.10,  # Memfilter lantai agar tidak menggambar lingkaran di tanah
+            'max_height': 1.50,  # Mengambil dinding dan rintangan setinggi 1.5m
+            'angle_min': -3.141592,
+            'angle_max': 3.141592,
+            'angle_increment': 0.00349,
+            'scan_time': 0.1,
+            'range_min': 0.10,
+            'range_max': 50.0,
+            'use_inf': True,
             'use_sim_time': LaunchConfiguration('use_sim_time')
         }],
+        condition=IfCondition(EqualsSubstitution(LaunchConfiguration('lidar_mode'), '3d')),
         output='screen'
     )
 
@@ -126,6 +173,22 @@ def generate_launch_description():
         ]
     )
 
+    # 5. RViz2 Node — otomatis terbuka bersama simulasi
+    rviz_node = TimerAction(
+        period=3.5,
+        actions=[
+            Node(
+                package='rviz2',
+                executable='rviz2',
+                name='rviz2',
+                arguments=['-d', rviz_config_path],
+                parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+                condition=IfCondition(LaunchConfiguration('rviz_sim')),
+                output='screen'
+            )
+        ]
+    )
+
     return LaunchDescription([
         set_gz_resource_path,
         world_arg,
@@ -134,8 +197,13 @@ def generate_launch_description():
         y_arg,
         z_arg,
         lidar_mode_arg,
-        gz_sim,       # 1. Gazebo start
-        bridge_node,  # 2. Bridge (termasuk /clock)
-        rsp,          # 3. RSP setelah 3 detik (sim clock sudah ada)
-        spawn_entity  # 4. Spawn robot setelah 5 detik (world sudah loaded)
+        rviz_arg,
+        gz_sim,            # 1. Gazebo start
+        base_bridge_node,  # 2. Bridge dasar (Clock, Odom, CmdVel, TF, Camera, IMU)
+        bridge_2d,         # 3a. Bridge 2D: /scan (hanya aktif jika lidar_mode:=2d)
+        bridge_3d,         # 3b. Bridge 3D: /points (hanya aktif jika lidar_mode:=3d)
+        p2l_node,          # 3c. Konversi /points -> /scan (hanya aktif jika lidar_mode:=3d)
+        rsp,               # 4. RSP setelah 2 detik
+        spawn_entity,      # 5. Spawn robot setelah 3 detik
+        rviz_node          # 6. RViz2 setelah 3.5 detik
     ])
