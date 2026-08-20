@@ -9,6 +9,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
     pkg_mapping_path = get_package_share_directory('robot_mapping')
+    rviz_config_path = os.path.join(pkg_mapping_path, 'rviz', 'slam.rviz')
 
     # 1. Jalankan SLAM Toolbox
     slam = IncludeLaunchDescription(
@@ -16,11 +17,12 @@ def generate_launch_description():
         launch_arguments={'use_sim_time': use_sim_time}.items()
     )
 
-    # 2. Jalankan RViz2 dengan use_sim_time
+    # 2. Jalankan RViz2 dengan konfigurasi SLAM
     rviz2 = Node(
         package='rviz2',
         executable='rviz2',
         name='rviz2',
+        arguments=['-d', rviz_config_path],
         parameters=[{'use_sim_time': use_sim_time}],
         output='screen'
     )
