@@ -118,14 +118,14 @@ def generate_launch_description():
         ],
         parameters=[{
             'target_frame': 'base_footprint',
-            'transform_tolerance': 0.05,
-            'min_height': 0.10,  # Memfilter lantai agar tidak menggambar lingkaran di tanah
+            'transform_tolerance': 0.2,
+            'min_height': 0.12,  # Memfilter lantai agar tidak menggambar lingkaran di tanah
             'max_height': 1.50,  # Mengambil dinding dan rintangan setinggi 1.5m
             'angle_min': -3.141592,
             'angle_max': 3.141592,
-            'angle_increment': 0.00349,
+            'angle_increment': 0.008726,  # 0.5° per ray
             'scan_time': 0.1,
-            'range_min': 0.10,
+            'range_min': 0.30,   # Melewati radius bodi robot (0.18m) & ground hit dekat
             'range_max': 50.0,
             'use_inf': True,
             'use_sim_time': LaunchConfiguration('use_sim_time')

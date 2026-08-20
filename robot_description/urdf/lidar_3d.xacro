@@ -86,9 +86,9 @@
                 <gz:frame_id>lidar_3d_link</gz:frame_id>
                 <lidar>
                     <scan>
-                        <!-- Horizontal: 360° penuh, 1800 sample (0.2° per step) -->
+                        <!-- Horizontal: 360° penuh, 720 sample (0.5° per step) -->
                         <horizontal>
-                            <samples>1800</samples>
+                            <samples>720</samples>
                             <resolution>1</resolution>
                             <min_angle>${-PI}</min_angle>
                             <max_angle>${PI}</max_angle>
