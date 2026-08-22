@@ -35,7 +35,7 @@ def generate_launch_description():
 
     # ── 2. SLAM Toolbox (delay 2.5s) ────────────────────────────────────
     slam_launch = TimerAction(
-        period=2.5,
+        period=7.0,
         actions=[
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
@@ -48,7 +48,7 @@ def generate_launch_description():
 
     # ── 3. OctoMap (mode 3D saja, delay 2.5s) ───────────────────────────
     octomap_launch = TimerAction(
-        period=2.5,
+        period=7.0,
         actions=[
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
@@ -60,10 +60,24 @@ def generate_launch_description():
         ]
     )
 
+    # ── 4. RViz2 (config SLAM displays) ───────────────────────────
+    rviz_config = os.path.join(pkg_mapping, 'rviz', 'slam.rviz')
+    rviz_node = TimerAction(
+        period=10.0,
+        actions = [Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz2',
+        arguments=['-d', rviz_config],
+        parameters=[{'use_sim_time': use_sim_time}],
+        condition=IfCondition(LaunchConfiguration('rviz')),
+        output='screen'
+    )])
+
     # ── 4. Nav2 + Frontier Auto-Explorer (delay 8s) ──────────────────────
     # Nav2 butuh /map dari SLAM sebelum bisa configure global_costmap
     auto_mapping_launch = TimerAction(
-        period=8.0,
+        period=15.0,
         actions=[
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
@@ -74,17 +88,7 @@ def generate_launch_description():
         ]
     )
 
-    # ── 5. RViz2 (config SLAM + Nav2 displays) ───────────────────────────
-    rviz_config = os.path.join(pkg_mapping, 'rviz', 'slam.rviz')
-    rviz_node = Node(
-        package='rviz2',
-        executable='rviz2',
-        name='rviz2',
-        arguments=['-d', rviz_config],
-        parameters=[{'use_sim_time': use_sim_time}],
-        condition=IfCondition(LaunchConfiguration('rviz')),
-        output='screen'
-    )
+
 
     return LaunchDescription([
         DeclareLaunchArgument('world',        default_value='turtlebot3_house.world'),
