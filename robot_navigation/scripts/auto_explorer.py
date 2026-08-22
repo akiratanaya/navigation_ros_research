@@ -118,16 +118,38 @@ class FrontierExplorer(Node):
 
         frontiers = self._find_frontiers()
         if not frontiers:
+            # Toleransi 5x retry sebelum menyatakan eksplorasi selesai
+            self._no_frontier_retry = getattr(self, '_no_frontier_retry', 0) + 1
+            if self._no_frontier_retry < 5:
+                return
+            
             self.get_logger().info('✅ Tidak ada frontier tersisa — eksplorasi selesai!')
-            self.destroy_timer(self._timer_list[-1] if hasattr(self, '_timer_list') else None)
             return
+
+        # Reset counter jika frontier ditemukan
+        self._no_frontier_retry = 0
 
         # Pilih frontier terdekat yang belum pernah dikunjungi
         goal = self._select_best_frontier(frontiers, robot_pos)
         if goal is None:
+            self._stuck_retry = getattr(self, '_stuck_retry', 0) + 1
+            
+            # Jika sempat dianggap stuck 3x, reset blacklist agar dicoba ulang setelah costmap Nav2 sync
+            if self._stuck_retry == 3:
+                if hasattr(self, '_blacklist'):
+                    self.get_logger().info('🔄 Mereset blacklist frontier untuk mencoba ulang jalur...')
+                    self._blacklist.clear()
+                return
+
+            if self._stuck_retry < 6:
+                self.get_logger().info(f'⚠️ Menunggu Nav2/Costmap sync... ({self._stuck_retry}/6)', throttle_duration_sec=2.0)
+                return
+
             self.get_logger().warn('⚠️  Semua frontier sudah dicoba — eksplorasi selesai.')
             return
 
+        # Reset counter jika goal valid ditemukan
+        self._stuck_retry = 0
         self._send_nav_goal(goal[0], goal[1])
 
     # ------------------------------------------------------------------ #
