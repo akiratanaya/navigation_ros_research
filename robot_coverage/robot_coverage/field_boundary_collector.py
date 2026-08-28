@@ -142,12 +142,23 @@ class FieldBoundaryCollector(Node):
 
         # reset untuk sesi berikutnya
         self.points = []
+        self.clear_preview_marker()
 
         return response
+
+    def clear_preview_marker(self):
+        marker = Marker()
+        marker.header.frame_id = 'map'
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = 'field_boundary_preview'
+        marker.id = 0
+        marker.action = Marker.DELETE
+        self.marker_pub.publish(marker)
 
     def reset_cb(self, request, response):
         n = len(self.points)
         self.points = []
+        self.clear_preview_marker()
         response.success = True
         response.message = f"Direset. {n} titik dihapus."
         self.get_logger().info(response.message)
