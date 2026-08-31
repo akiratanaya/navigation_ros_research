@@ -27,6 +27,8 @@ setup(
         'console_scripts': [
             'coverage_server = robot_coverage.main:main',
             'field_boundary_collector = robot_coverage.field_boundary_collector:main',
+            'coverage_navigator = robot_coverage.coverage_navigator:main',
+            'footprint_trail_visualizer = robot_coverage.footprint_trail_visualizer:main',
         ],
     },
 )

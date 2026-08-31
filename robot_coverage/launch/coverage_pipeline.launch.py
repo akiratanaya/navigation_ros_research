@@ -63,17 +63,17 @@ def generate_launch_description():
     )
     cov_width_arg = DeclareLaunchArgument(
         'cov_width',
-        default_value='0.3',
+        default_value='0.28',
         description='Lebar jangkauan swath / coverage tool (meter)'
     )
     headland_swaths_arg = DeclareLaunchArgument(
         'headland_swaths',
-        default_value='1',
+        default_value='0',
         description='Jumlah putaran headland di pinggir lahan'
     )
     route_pattern_arg = DeclareLaunchArgument(
         'route_pattern',
-        default_value='or_tools',
+        default_value='boustrophedon',
         description='Pola rute: "or_tools", "boustrophedon", "snake", atau "spiral"'
     )
     decomp_method_arg = DeclareLaunchArgument(
@@ -91,6 +91,22 @@ def generate_launch_description():
         default_value='4',
         description='Lebar lompatan jalur pola spiral (jumlah jalur per blok spiral)'
     )
+    use_navigator_arg = DeclareLaunchArgument(
+        'use_navigator',
+        default_value='true',
+        description='Jalankan coverage_navigator untuk menghubungkan ke Nav2'
+    )
+    auto_navigate_arg = DeclareLaunchArgument(
+        'auto_navigate',
+        default_value='true',
+        description='Otomatis jalankan navigasi Nav2 saat /coverage_path diterima'
+    )
+
+    use_map_server_arg = DeclareLaunchArgument(
+        'use_map_server',
+        default_value='true',
+        description='Jalankan map_server mandiri (set false jika localization_launch sudah dijalankan)'
+    )
 
     map_yaml_file = LaunchConfiguration('map')
     use_sim_time = LaunchConfiguration('use_sim_time')
@@ -104,6 +120,9 @@ def generate_launch_description():
     decomp_method = LaunchConfiguration('decomp_method')
     split_angle = LaunchConfiguration('split_angle')
     spiral_width = LaunchConfiguration('spiral_width')
+    use_navigator = LaunchConfiguration('use_navigator')
+    auto_navigate = LaunchConfiguration('auto_navigate')
+    use_map_server = LaunchConfiguration('use_map_server')
 
     # ── 1. Map Server Node ───────────────────────────────────────────────────
     map_server_node = Node(
@@ -115,6 +134,7 @@ def generate_launch_description():
             'yaml_filename': map_yaml_file,
             'use_sim_time': use_sim_time,
         }],
+        condition=IfCondition(use_map_server),
     )
 
     # ── 2. Lifecycle Manager untuk Map Server (Standar Nav2) ──────────────────
@@ -128,6 +148,7 @@ def generate_launch_description():
             'autostart': True,
             'node_names': ['map_server']
         }],
+        condition=IfCondition(use_map_server),
     )
 
     # ── 3. Field Boundary Collector Node ─────────────────────────────────────
@@ -158,7 +179,33 @@ def generate_launch_description():
         }],
     )
 
-    # ── 5. RViz2 dengan Config Coverage (Delay 1.0s agar map_server aktif) ───
+    # ── 5. Coverage Navigator Node (Bridge ke Nav2 navigate_through_poses) ───
+    coverage_navigator_node = Node(
+        package='robot_coverage',
+        executable='coverage_navigator',
+        name='coverage_navigator',
+        output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'auto_navigate': auto_navigate,
+        }],
+        condition=IfCondition(use_navigator),
+    )
+
+    # ── 6. Footprint Trail Visualizer (Jejak Visual Real-Time & Metrik Cakupan) ──
+    footprint_trail_node = Node(
+        package='robot_coverage',
+        executable='footprint_trail_visualizer',
+        name='footprint_trail_visualizer',
+        output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'tool_width': cov_width,
+            'update_dist': 0.04,
+        }],
+    )
+
+    # ── 7. RViz2 dengan Config Coverage (Delay 1.0s agar map_server aktif) ───
     rviz_node = TimerAction(
         period=1.0,
         actions=[
@@ -187,9 +234,14 @@ def generate_launch_description():
         decomp_method_arg,
         split_angle_arg,
         spiral_width_arg,
+        use_navigator_arg,
+        auto_navigate_arg,
+        use_map_server_arg,
         map_server_node,
         lifecycle_manager_node,
         field_boundary_collector_node,
         coverage_server_node,
+        coverage_navigator_node,
+        footprint_trail_node,
         rviz_node,
     ])

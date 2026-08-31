@@ -125,6 +125,57 @@ Visualization Manager:
       Namespaces:
         coverage_trajectory: true
       Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Marker Topic:
+        Depth: 10
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /coverage_swept_footprint
+      Name: Swept Footprint Trail
+      Namespaces:
+        swept_footprint: true
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/LaserScan
+      Color: 255; 0; 0
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Name: LaserScan
+      Position Tolerance: 0.1
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.05
+      Style: Flat Squares
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /scan
+      Use Fixed Frame: true
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 255; 0; 128
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.04
+      Name: Nav2 Global Plan
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0.08
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /plan
+      Value: true
     - Alpha: 1
       Class: rviz_default_plugins/RobotModel
       Collision Enabled: false
