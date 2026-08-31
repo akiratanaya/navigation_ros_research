@@ -6,7 +6,7 @@ class PathGenerator:
         self.curve_type = curve_type.lower()
         self.planner = f2c.PP_PathPlanning()
 
-    def generate(self, robot: f2c.Robot, swaths: f2c.Swaths) -> f2c.Path:
+    def generate(self, robot: f2c.Robot, route) -> f2c.Path:
         robot.setMinTurningRadius(self.turning_radius)
         
         if self.curve_type == "dubins":
@@ -16,4 +16,4 @@ class PathGenerator:
         else:
             raise ValueError(f"Unknown curve type: {self.curve_type}")
 
-        return self.planner.planPath(robot, swaths, curve)
+        return self.planner.planPath(robot, route, curve)
