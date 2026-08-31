@@ -156,7 +156,7 @@ def generate_launch_description():
     ])
 
     spawn_entity = TimerAction(
-        period=3.0,
+        period=5.5,
         actions=[
             Node(
                 package='ros_gz_sim',
@@ -175,7 +175,7 @@ def generate_launch_description():
 
     # 5. RViz2 Node — otomatis terbuka bersama simulasi
     rviz_node = TimerAction(
-        period=3.5,
+        period=6.0,
         actions=[
             Node(
                 package='rviz2',
