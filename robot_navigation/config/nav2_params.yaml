@@ -30,9 +30,16 @@ amcl:
     scan_topic: /scan
     sigma_hit: 0.2
     tf_broadcast: true
-    transform_tolerance: 1.0
+    transform_tolerance: 2.0
     update_min_a: 0.2
     update_min_d: 0.25
+    always_reset_initial_pose: true
+    set_initial_pose: true
+    initial_pose:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      yaw: 0.0
     z_hit: 0.5
     z_max: 0.05
     z_rand: 0.5
@@ -91,11 +98,11 @@ collision_monitor:
   ros__parameters:
     FootprintApproach:
       action_type: approach
-      enabled: true
+      enabled: false
       footprint_topic: /local_costmap/published_footprint
-      min_points: 6
-      simulation_time_step: 0.1
-      time_before_collision: 1.2
+      min_points: 10
+      simulation_time_step: 0.05
+      time_before_collision: 0.15
       type: polygon
       visualize: false
     base_frame_id: base_footprint
@@ -119,119 +126,113 @@ collision_monitor:
     transform_tolerance: 0.5
 controller_server:
   ros__parameters:
+    use_sim_time: true
+    controller_frequency: 20.0
+    costmap_update_timeout: 0.3
+    failure_tolerance: 1.0
+    min_theta_velocity_threshold: 0.001
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.5
+    controller_plugins:
+    - FollowPath
+    goal_checker_plugins:
+    - general_goal_checker
+    progress_checker_plugins:
+    - progress_checker
+
+    general_goal_checker:
+      plugin: nav2_controller::SimpleGoalChecker
+      stateful: false
+      xy_goal_tolerance: 0.15
+      yaw_goal_tolerance: 0.5
+
+    progress_checker:
+      movement_time_allowance: 45.0
+      plugin: nav2_controller::SimpleProgressChecker
+      required_movement_radius: 0.10
+
     FollowPath:
-      AckermannConstraints:
-        min_turning_r: 0.2
-      ConstraintCritic:
-        cost_power: 1
-        cost_weight: 4.0
-        enabled: true
-      CostCritic:
-        collision_cost: 1000000.0
-        consider_footprint: false
-        cost_power: 1
-        cost_weight: 3.81
-        critical_cost: 300.0
-        enabled: true
-        near_collision_cost: 253
-        near_goal_distance: 1.0
-        trajectory_point_step: 2
-      GoalAngleCritic:
-        cost_power: 1
-        cost_weight: 3.0
-        enabled: true
-        threshold_to_consider: 0.5
-      GoalCritic:
-        cost_power: 1
-        cost_weight: 5.0
-        enabled: true
-        threshold_to_consider: 1.4
-      PathAlignCritic:
-        cost_power: 1
-        cost_weight: 14.0
-        enabled: true
-        max_path_occupancy_ratio: 0.05
-        offset_from_furthest: 20
-        threshold_to_consider: 0.5
-        trajectory_point_step: 4
-        use_path_orientations: false
-      PathAngleCritic:
-        cost_power: 1
-        cost_weight: 2.0
-        enabled: true
-        max_angle_to_furthest: 1.0
-        mode: 0
-        offset_from_furthest: 4
-        threshold_to_consider: 0.5
-      PathFollowCritic:
-        cost_power: 1
-        cost_weight: 5.0
-        enabled: true
-        offset_from_furthest: 5
-        threshold_to_consider: 1.4
-      PreferForwardCritic:
-        cost_power: 1
-        cost_weight: 5.0
-        enabled: true
-        threshold_to_consider: 0.5
-      TrajectoryVisualizer:
-        time_step: 3
-        trajectory_step: 5
+      plugin: nav2_rotation_shim_controller::RotationShimController
+      primary_controller: nav2_mppi_controller::MPPIController
+      angular_dist_threshold: 0.40
+      forward_sampling_distance: 0.35
+      rotate_to_heading_angular_vel: 1.80
+      max_angular_accel: 4.0
+      rotate_to_heading_once: false
+
+      time_steps: 35
+      model_dt: 0.05
+      batch_size: 1500
       ax_max: 3.0
       ax_min: -3.0
       ay_max: 3.0
       ay_min: -3.0
-      az_max: 3.5
-      batch_size: 2000
-      critics:
-      - ConstraintCritic
-      - CostCritic
-      - GoalCritic
-      - GoalAngleCritic
-      - PathAlignCritic
-      - PathFollowCritic
-      - PathAngleCritic
-      - PreferForwardCritic
-      gamma: 0.015
-      iteration_count: 1
-      model_dt: 0.05
-      motion_model: DiffDrive
-      plugin: nav2_mppi_controller::MPPIController
-      prune_distance: 1.7
-      regenerate_noises: true
-      temperature: 0.3
-      time_steps: 56
-      transform_tolerance: 0.1
-      visualize: true
-      vx_max: 0.5
-      vx_min: -0.35
+      az_max: 4.0
       vx_std: 0.2
-      vy_max: 0.5
       vy_std: 0.2
-      wz_max: 1.9
-      wz_std: 0.4
-    controller_frequency: 20.0
-    controller_plugins:
-    - FollowPath
-    costmap_update_timeout: 0.3
-    failure_tolerance: 0.3
-    general_goal_checker:
-      plugin: nav2_controller::SimpleGoalChecker
-      stateful: true
-      xy_goal_tolerance: 0.25
-      yaw_goal_tolerance: 0.25
-    goal_checker_plugins:
-    - general_goal_checker
-    min_theta_velocity_threshold: 0.001
-    min_x_velocity_threshold: 0.001
-    min_y_velocity_threshold: 0.5
-    progress_checker:
-      movement_time_allowance: 10.0
-      plugin: nav2_controller::SimpleProgressChecker
-      required_movement_radius: 0.5
-    progress_checker_plugins:
-    - progress_checker
-    use_realtime_priority: false
+      wz_std: 0.5
+      vx_max: 0.40
+      vx_min: -0.10
+      vy_max: 0.0
+      wz_max: 2.5
+      iteration_count: 1
+      prune_distance: 0.20
+      transform_tolerance: 0.1
+      temperature: 0.3
+      gamma: 0.015
+      motion_model: "DiffDrive"
+      visualize: false
+      regenerate_noises: true
+      critics: [
+        "ConstraintCritic", "CostCritic", "GoalCritic",
+        "PathAlignCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic"]
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+      GoalCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 1.0
+      PreferForwardCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 2.0
+        threshold_to_consider: 0.5
+      CostCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+        near_collision_cost: 253
+        critical_cost: 300.0
+        consider_footprint: false
+        collision_cost: 1000000.0
+        near_goal_distance: 0.5
+        trajectory_point_step: 2
+      PathAlignCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 14.0
+        max_path_occupancy_ratio: 0.05
+        trajectory_point_step: 2
+        threshold_to_consider: 0.5
+        offset_from_furthest: 5
+        use_path_orientations: true
+      PathFollowCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 8.0
+        offset_from_furthest: 4
+        threshold_to_consider: 1.0
+      PathAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.0
+        offset_from_furthest: 4
+        threshold_to_consider: 0.5
+        max_angle_to_furthest: 1.2
+        mode: 0
 docking_server:
   ros__parameters:
     base_frame: base_footprint
@@ -279,8 +280,8 @@ global_costmap:
       always_send_full_costmap: true
       global_frame: map
       inflation_layer:
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.7
+        cost_scaling_factor: 10.0
+        inflation_radius: 0.18
         plugin: nav2_costmap_2d::InflationLayer
       obstacle_layer:
         enabled: true
@@ -291,9 +292,9 @@ global_costmap:
           data_type: LaserScan
           marking: true
           max_obstacle_height: 2.0
-          obstacle_max_range: 2.5
+          obstacle_max_range: 5.0
           obstacle_min_range: 0.0
-          raytrace_max_range: 3.0
+          raytrace_max_range: 6.0
           raytrace_min_range: 0.0
           topic: /scan
       plugins:
@@ -303,29 +304,29 @@ global_costmap:
       publish_frequency: 1.0
       resolution: 0.05
       robot_base_frame: base_footprint
-      robot_radius: 0.18
+      footprint: "[ [0.16, 0.17], [0.16, -0.17], [-0.16, -0.17], [-0.16, 0.17] ]"
       static_layer:
         map_subscribe_transient_local: true
         plugin: nav2_costmap_2d::StaticLayer
       track_unknown_space: true
-      update_frequency: 1.0
+      update_frequency: 2.0
 local_costmap:
   local_costmap:
     ros__parameters:
       always_send_full_costmap: true
       global_frame: odom
-      height: 3
+      height: 4
       inflation_layer:
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.7
+        cost_scaling_factor: 10.0
+        inflation_radius: 0.18
         plugin: nav2_costmap_2d::InflationLayer
       plugins:
       - voxel_layer
       - inflation_layer
-      publish_frequency: 2.0
+      publish_frequency: 5.0
       resolution: 0.05
       robot_base_frame: base_footprint
-      robot_radius: 0.18
+      footprint: "[ [0.16, 0.17], [0.16, -0.17], [-0.16, -0.17], [-0.16, 0.17] ]"
       rolling_window: true
       static_layer:
         map_subscribe_transient_local: true
@@ -344,14 +345,14 @@ local_costmap:
           data_type: LaserScan
           marking: true
           max_obstacle_height: 2.0
-          obstacle_max_range: 2.5
+          obstacle_max_range: 5.0
           obstacle_min_range: 0.0
-          raytrace_max_range: 3.0
+          raytrace_max_range: 6.0
           raytrace_min_range: 0.0
           topic: /scan
         z_resolution: 0.05
         z_voxels: 16
-      width: 3
+      width: 4
 loopback_simulator:
   ros__parameters:
     base_frame_id: base_footprint
@@ -376,8 +377,8 @@ planner_server:
     GridBased:
       allow_unknown: true
       plugin: nav2_navfn_planner::NavfnPlanner
-      tolerance: 0.5
-      use_astar: false
+      tolerance: 1.2
+      use_astar: true
     costmap_update_timeout: 1.0
     expected_planner_frequency: 20.0
     planner_plugins:
@@ -422,21 +423,21 @@ velocity_smoother:
     - 0.0
     feedback: OPEN_LOOP
     max_accel:
-    - 2.5
+    - 3.5
     - 0.0
-    - 3.2
+    - 4.5
     max_decel:
-    - -2.5
+    - -3.5
     - 0.0
-    - -3.2
+    - -4.5
     max_velocity:
-    - 0.5
+    - 0.85
     - 0.0
-    - 2.0
+    - 2.8
     min_velocity:
-    - -0.5
+    - -0.4
     - 0.0
-    - -2.0
+    - -2.8
     odom_duration: 0.1
     odom_topic: odom
     scale_velocities: false

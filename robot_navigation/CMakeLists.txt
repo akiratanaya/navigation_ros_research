@@ -22,6 +22,7 @@ install(
 install(
   PROGRAMS
     scripts/auto_explorer.py
+    scripts/initial_pose_pub.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
