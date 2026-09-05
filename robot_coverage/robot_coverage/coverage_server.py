@@ -39,7 +39,8 @@ import cv2
 
 from robot_coverage.visualizer import Visualizer
 from rclpy.qos import QoSProfile, DurabilityPolicy, HistoryPolicy, ReliabilityPolicy
-from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.geometry import Polygon as ShapelyPolygon, LineString as ShapelyLineString
+from tf2_ros import Buffer, TransformListener
 
 
 class CoverageServer(Node):
@@ -48,7 +49,7 @@ class CoverageServer(Node):
 
         self.declare_parameter('auto_compute', True)
         self.declare_parameter('robot_width', 0.15)
-        self.declare_parameter('cov_width', 0.28)
+        self.declare_parameter('cov_width', 0.24)
         self.declare_parameter('turning_radius', 0.05)
         self.declare_parameter('swath_angle', 0.5 * math.pi)  # 90 deg = vertical swaths
 
@@ -69,16 +70,94 @@ class CoverageServer(Node):
         self.current_field_polygon = None
         self.current_map: OccupancyGrid | None = None
 
+        # TF untuk membaca posisi robot saat path di-generate
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
         self.boundary_sub = self.create_subscription(
             PolygonStamped, '/field_boundary', self.boundary_cb, latch_qos)
         self.map_sub = self.create_subscription(
             OccupancyGrid, '/map', self.map_cb, latch_qos)
+        # Subscribe ke global costmap untuk filter waypoint dalam obstacle
+        self.costmap_sub = self.create_subscription(
+            OccupancyGrid, '/global_costmap/costmap', self.costmap_cb,
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                       history=HistoryPolicy.KEEP_LAST,
+                       reliability=ReliabilityPolicy.RELIABLE))
+        self.current_costmap: OccupancyGrid | None = None
 
         self.create_timer(1.0, self.republish_cb)
         self.get_logger().info("Coverage Server Pipeline siap menerima field boundary & rintangan peta.")
 
+    def _get_robot_pose_from_tf(self):
+        """Baca posisi robot (x, y, yaw) dari TF map -> base_footprint."""
+        try:
+            t = self.tf_buffer.lookup_transform(
+                'map', 'base_footprint', rclpy.time.Time(),
+                timeout=rclpy.duration.Duration(seconds=0.5))
+            rx = t.transform.translation.x
+            ry = t.transform.translation.y
+            q = t.transform.rotation
+            siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+            cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+            yaw = math.atan2(siny_cosp, cosy_cosp)
+            return (rx, ry, yaw)
+        except Exception:
+            return None
+
     def map_cb(self, msg: OccupancyGrid):
         self.current_map = msg
+
+    def costmap_cb(self, msg: OccupancyGrid):
+        self.current_costmap = msg
+
+    def _filter_obstacle_waypoints(self, ros_path: Path) -> Path:
+        """
+        Hapus waypoint yang berada di dalam sel obstacle costmap (nilai >= 65).
+        Ini menghilangkan waypoint yang dihasilkan Dubins curves yang melewati
+        area kaki meja atau inflation zone-nya.
+        Nilai costmap Nav2: 0=bebas, 1-252=berbiaya, 253=lethal, 254=inflated_obstacle
+        """
+        cm = self.current_costmap
+        if cm is None or not ros_path.poses:
+            self.get_logger().warn("⚠️ Costmap belum tersedia, filter obstacle waypoint dilewati.")
+            return ros_path
+
+        info = cm.info
+        res = info.resolution
+        ox = info.origin.position.x
+        oy = info.origin.position.y
+        w = info.width
+        h = info.height
+        data = cm.data  # list of int (0-255)
+
+        filtered_poses = []
+        removed = 0
+
+        for pose in ros_path.poses:
+            px = pose.pose.position.x
+            py = pose.pose.position.y
+            gx = int((px - ox) / res)
+            gy = int((py - oy) / res)
+
+            if 0 <= gx < w and 0 <= gy < h:
+                cost = data[gy * w + gx]
+                # Hapus waypoint jika cell berbiaya tinggi (lethal = 253/254, atau inflated >= 65)
+                if cost >= 65:
+                    removed += 1
+                    continue  # skip waypoint ini
+
+            filtered_poses.append(pose)
+
+        if removed > 0:
+            self.get_logger().info(
+                f"🗑️  Filter obstacle: {removed} waypoint dalam obstacle zone dihapus "
+                f"({len(filtered_poses)} waypoint tersisa dari {len(ros_path.poses)} total).")
+
+        result = Path()
+        result.header = ros_path.header
+        result.poses = filtered_poses
+        return result
 
     def boundary_cb(self, msg: PolygonStamped):
         self.current_field_polygon = msg.polygon
@@ -141,11 +220,11 @@ class CoverageServer(Node):
             occ_interior, cv2.MORPH_CLOSE,
             cv2.getStructuringElement(cv2.MORPH_RECT, (close_kx, close_ky)))
 
-        # Inflasi clearance bodi robot (0.15m)
-        dilate_k = max(3, int(0.15 / res) * 2 + 1)
+        # Inflasi clearance kaki meja (0.22m agar bodi robot 0.34m bebas tabrakan dari kaki meja)
+        dilate_k = max(3, int(0.22 / res) * 2 + 1)
         inflated = cv2.dilate(
             side_panels, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilate_k, dilate_k)))
-
+        
         contours, _ = cv2.findContours(inflated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         obs_list = []
         for cnt in contours:
@@ -161,7 +240,7 @@ class CoverageServer(Node):
                         f"🛡️ Rintangan panel samping meja: luas={area:.3f}m² pada posisi ({rect[0][0]*res+ox:.2f}, {rect[0][1]*res+oy:.2f})")
                     obs_list.append(obs_poly)
         return obs_list
-
+    
     # ══════════════════════════════════════════════════════════════════════════
     #  SHAPELY → f2c.Cells CONVERSION
     # ══════════════════════════════════════════════════════════════════════════
@@ -222,100 +301,114 @@ class CoverageServer(Node):
             if field_poly.is_empty:
                 return False, "Area lahan kosong setelah dikurangi rintangan."
 
-            # ── 2. Konversi ke f2c.Cells (Exterior + Interior Hole) ──
-            cells = self._shapely_to_f2c_cells(field_poly)
-            if cells.size() == 0:
+            # ── 2. Konversi ke f2c.Cells (Exterior + Interior Hole Rintangan) ──
+            raw_cells = self._shapely_to_f2c_cells(field_poly)
+            if raw_cells.size() == 0:
                 return False, "f2c.Cells kosong."
 
-            cell0 = cells.getGeometry(0)
+            # ── 3. Boustrophedon Cellular Decomposition (Untuk Analisis & Visualisasi Sub-Sel) ──
+            decomp = f2c.DECOMP_Boustrophedon()
+            cells = decomp.decompose(raw_cells)
             self.get_logger().info(
-                f"📐 Cells siap: {cells.size()} cell(s), Cell 0 memiliki {cell0.size()} ring(s) "
-                f"({cell0.size() - 1} rintangan hole)")
+                f"🧩 Cellular Decomposition: Lahan berhasil dipecah menjadi {cells.size()} sub-sel independen!")
+            for i in range(cells.size()):
+                c_i = cells.getGeometry(i)
+                self.get_logger().info(f"   ├─ Sub-Sel {i}: Luas = {c_i.area():.2f}m²")
 
-            # ── 3. Setup Robot ──
+            # ── 4. Setup Robot ──
             robot = f2c.Robot(robot_width, cov_width)
             robot.setMinTurningRadius(turning_radius)
 
-            # ── 4. Headland Generation ──
-            hl_gen = f2c.HG_Const_gen()
-            headlands = hl_gen.generateHeadlands(cells, 0.12)
-
-            # ── 5. Swath Generation (BruteForce) ──
+            # ── 5. Swaths Paralel Menghindari Rintangan Meja ──
+            # Menggunakan raw_cells yang sudah memiliki lubang rintangan meja (interior rings)
+            # agar Fields2Cover memotong swath di depan rintangan secara alami
             sg = f2c.SG_BruteForce()
-            raw_swaths = sg.generateSwaths(swath_angle, cov_width, headlands)
+            swaths = f2c.Swaths()
+            for k in range(raw_cells.size()):
+                c_sw = sg.generateSwaths(swath_angle, cov_width, raw_cells.getGeometry(k))
+                for s_i in range(c_sw.size()):
+                    swaths.push_back(c_sw[s_i])
 
-            # Filter swath buntu/stub (< 0.60m) agar robot tidak terjebak U-turn sempit di depan kaki meja
-            swaths = f2c.SwathsByCells()
-            min_swath_len = 0.60
-            for i in range(raw_swaths.size()):
-                cell_swaths = f2c.Swaths()
-                for j in range(raw_swaths[i].size()):
-                    s = raw_swaths[i][j]
-                    if s.length() >= min_swath_len:
-                        cell_swaths.push_back(s)
-                if cell_swaths.size() > 0:
-                    swaths.push_back(cell_swaths)
+            if swaths.size() == 0:
+                ext_ring = f2c.LinearRing()
+                for px, py in poly_pts:
+                    ext_ring.addPoint(f2c.Point(float(px), float(py), 0.0))
+                ext_ring.addPoint(f2c.Point(float(poly_pts[0][0]), float(poly_pts[0][1]), 0.0))
+                field_cell = f2c.Cell()
+                field_cell.addRing(ext_ring)
+                swaths = sg.generateSwaths(swath_angle, cov_width, field_cell)
 
-            total_swaths = sum(swaths[i].size() for i in range(swaths.size()))
-            if total_swaths == 0:
-                return False, "Swath generation menghasilkan 0 swath."
+            boustro = f2c.RP_Boustrophedon()
+            robot_pose = self._get_robot_pose_from_tf()
+            rx = robot_pose[0] if robot_pose else poly_pts[0][0]
+            ry = robot_pose[1] if robot_pose else poly_pts[0][1]
 
-            self.get_logger().info(f"🔀 Swaths: {total_swaths} baris sapuan terpotong rapi di sekeliling meja.")
+            best_v = 0
+            min_d = float('inf')
+            for v in range(4):
+                test_sw = boustro.genSortedSwaths(swaths, v)
+                if test_sw.size() > 0:
+                    sp = test_sw[0].startPoint()
+                    d = math.hypot(sp.getX() - rx, sp.getY() - ry)
+                    if d < min_d:
+                        min_d = d
+                        best_v = v
 
-            # ── 6. Route Planning (Forward Directed Swaths Route) ──
-            # Kumpulkan semua swath valid dan urutkan dari pintu (x terbesar) ke sisi jauh (x terkecil)
-            cell_swaths = []
-            for i in range(raw_swaths.size()):
-                for j in range(raw_swaths[i].size()):
-                    s = raw_swaths[i][j]
-                    if s.length() >= 0.50:
-                        cell_swaths.append(s)
+            sorted_sw = boustro.genSortedSwaths(swaths, best_v)
+            p_start = sorted_sw[0].startPoint()
+            p_end = sorted_sw[sorted_sw.size() - 1].endPoint()
+            self.get_logger().info(
+                f"🚜 Swaths Paralel Bebas-Persilangan: {sorted_sw.size()} baris terurut "
+                f"| Titik Pangkal Terluar: ({p_start.getX():.2f}, {p_start.getY():.2f}) "
+                f"| End: ({p_end.getX():.2f}, {p_end.getY():.2f}).")
 
-            # Urutkan dari dekat pintu (x besar) ke lorong kiri (x kecil)
-            cell_swaths.sort(key=lambda s: -s.startPoint().getX())
-
-            # Bentuk rute sapuan bolak-balik maju (boustrophedon forward route)
-            # Indeks genap (0, 2, ...): maju ke Utara (y_min -> y_max)
-            # Indeks ganjil (1, 3, ...): maju ke Selatan (y_max -> y_min)
-            directed_swaths = f2c.Swaths()
-            for idx, s in enumerate(cell_swaths):
-                p1 = s.startPoint()
-                p2 = s.endPoint()
-                y_min_pt = p1 if p1.getY() < p2.getY() else p2
-                y_max_pt = p2 if p1.getY() < p2.getY() else p1
-
-                ls = f2c.LineString()
-                if idx % 2 == 0:
-                    ls.addPoint(y_min_pt)
-                    ls.addPoint(y_max_pt)
-                else:
-                    ls.addPoint(y_max_pt)
-                    ls.addPoint(y_min_pt)
-                directed_swaths.push_back(f2c.Swath(ls, s.getWidth()))
-
-            route = f2c.Route()
-            route.addSwaths(directed_swaths)
-
-            self.get_logger().info(f"🗺️ Route boustrophedon forward siap ({directed_swaths.size()} swaths, panjang {route.length():.2f}m)")
-
-            # ── 7. Path Planning (Dubins Curves Alami Maju) ──
+            # ── 6. Path Planning (Dubins Curves Kontinu Bebas Persilangan) ──
             pp = f2c.PP_PathPlanning()
             dubins = f2c.PP_DubinsCurves()
-            f2c_path = pp.planPath(robot, route, dubins)
-
+            f2c_path = pp.planPath(robot, sorted_sw, dubins)
             self.get_logger().info(f"📍 Path Dubins: {f2c_path.size()} titik (panjang {f2c_path.length():.2f}m)")
 
-            # ── 8. Konversi ke ROS 2 Path ──
+            # ── 7. Konversi ke ROS 2 Path ──
             ros_path = self._f2c_path_to_ros(f2c_path)
 
-            # ── 9. Visualisasi Markers & Publish ──
-            markers = self.vis.create_path_markers(f2c_path)
-            self.last_path = ros_path
-            self.last_markers = markers
-            self.path_pub.publish(ros_path)
-            self.marker_pub.publish(markers)
+            # ── 9b. Filter waypoint dalam polygon rintangan (kaki meja + clearance) ──
+            if obstacles:
+                valid_poses = []
+                num_dropped = 0
+                for p in ros_path.poses:
+                    from shapely.geometry import Point as ShapelyPoint
+                    pt = ShapelyPoint(p.pose.position.x, p.pose.position.y)
+                    inside = False
+                    for obs in obstacles:
+                        if obs.contains(pt):
+                            inside = True
+                            break
+                    if inside:
+                        num_dropped += 1
+                    else:
+                        valid_poses.append(p)
+                if num_dropped > 0:
+                    self.get_logger().info(
+                        f"🛡️  Filter polygon: {num_dropped} waypoint di dalam obstacle zone dihapus "
+                        f"({len(valid_poses)} tersisa).")
+                    ros_path.poses = valid_poses
 
-            return True, f"Coverage Path resmi Fields2Cover siap ({len(ros_path.poses)} waypoints, {directed_swaths.size()} swaths)"
+            # ── 9c. Filter waypoint dalam obstacle costmap (jika ada) ──
+            ros_path = self._filter_obstacle_waypoints(ros_path)
+
+            # ── 10. Visualisasi Markers & Publish (Jalur + Batas Tiap Sub-Sel) ──
+            path_markers = self.vis.create_path_markers(f2c_path)
+            cell_markers = self.vis.create_cells_markers(cells)
+            all_markers = MarkerArray()
+            all_markers.markers.extend(path_markers.markers)
+            all_markers.markers.extend(cell_markers.markers)
+
+            self.last_path = ros_path
+            self.last_markers = all_markers
+            self.path_pub.publish(ros_path)
+            self.marker_pub.publish(all_markers)
+
+            return True, f"Coverage Path Paralel Bebas-Persilangan ({cells.size()} sub-sel, {sorted_sw.size()} swaths, {len(ros_path.poses)} waypoints)"
 
         except Exception as e:
             import traceback
