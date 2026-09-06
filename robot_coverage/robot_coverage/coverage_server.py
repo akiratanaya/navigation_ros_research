@@ -52,6 +52,8 @@ class CoverageServer(Node):
         self.declare_parameter('cov_width', 0.24)
         self.declare_parameter('turning_radius', 0.05)
         self.declare_parameter('swath_angle', 0.5 * math.pi)  # 90 deg = vertical swaths
+        self.declare_parameter('enable_perimeter_tour', True)  # Pola robot komersial: Perimeter tour dulu, lalu infill
+        self.declare_parameter('headland_swaths', 1)
 
         latch_qos = QoSProfile(
             depth=1,
@@ -142,8 +144,8 @@ class CoverageServer(Node):
 
             if 0 <= gx < w and 0 <= gy < h:
                 cost = data[gy * w + gx]
-                # Hapus waypoint jika cell berbiaya tinggi (lethal = 253/254, atau inflated >= 65)
-                if cost >= 65:
+                # Hapus waypoint HANYA jika cell benar-benar rintangan lethal (cost >= 253)
+                if cost >= 253:
                     removed += 1
                     continue  # skip waypoint ini
 
@@ -213,23 +215,16 @@ class CoverageServer(Node):
         if np.count_nonzero(occ_interior) == 0:
             return []
 
-        # Morphological Close vertikal (tinggi 0.95m, lebar 0.10m) untuk menyatukan kaki depan-belakang meja
-        close_ky = max(3, int(0.95 / res))
-        close_kx = max(1, int(0.10 / res))
-        side_panels = cv2.morphologyEx(
-            occ_interior, cv2.MORPH_CLOSE,
-            cv2.getStructuringElement(cv2.MORPH_RECT, (close_kx, close_ky)))
-
-        # Inflasi clearance kaki meja (0.22m agar bodi robot 0.34m bebas tabrakan dari kaki meja)
-        dilate_k = max(3, int(0.22 / res) * 2 + 1)
+        # Inflasi clearance kaki meja secukupnya (0.08m agar bodi robot bebas tabrakan tapi kolong meja tetap terbuka luas)
+        dilate_k = max(3, int(0.08 / res) * 2 + 1)
         inflated = cv2.dilate(
-            side_panels, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilate_k, dilate_k)))
+            occ_interior, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilate_k, dilate_k)))
         
         contours, _ = cv2.findContours(inflated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         obs_list = []
         for cnt in contours:
             area = cv2.contourArea(cnt) * (res * res)
-            if area >= 0.02:  # Filter noise kecil
+            if area >= 0.005:  # Filter noise sangat kecil (kaki meja ~0.01m² - 0.03m²)
                 hull = cv2.convexHull(cnt)
                 rect = cv2.minAreaRect(hull)
                 box_pts = cv2.boxPoints(rect)
@@ -237,7 +232,7 @@ class CoverageServer(Node):
                 obs_poly = ShapelyPolygon(world_pts).buffer(0)
                 if obs_poly.is_valid and not obs_poly.is_empty:
                     self.get_logger().info(
-                        f"🛡️ Rintangan panel samping meja: luas={area:.3f}m² pada posisi ({rect[0][0]*res+ox:.2f}, {rect[0][1]*res+oy:.2f})")
+                        f"🛡️ Rintangan tiang interior: luas={area:.3f}m² pada posisi ({rect[0][0]*res+ox:.2f}, {rect[0][1]*res+oy:.2f})")
                     obs_list.append(obs_poly)
         return obs_list
     
@@ -289,6 +284,7 @@ class CoverageServer(Node):
             cov_width = self.get_parameter('cov_width').get_parameter_value().double_value
             turning_radius = self.get_parameter('turning_radius').get_parameter_value().double_value
             swath_angle = self.get_parameter('swath_angle').get_parameter_value().double_value
+            enable_perimeter = self.get_parameter('enable_perimeter_tour').get_parameter_value().bool_value
 
             # ── 1. Poligon Lahan Shapely dikurangi Rintangan Meja ──
             poly_pts = [(float(pt.x), float(pt.y)) for pt in self.current_field_polygon.points]
@@ -306,7 +302,7 @@ class CoverageServer(Node):
             if raw_cells.size() == 0:
                 return False, "f2c.Cells kosong."
 
-            # ── 3. Boustrophedon Cellular Decomposition (Untuk Analisis & Visualisasi Sub-Sel) ──
+            # ── 3. Boustrophedon Cellular Decomposition (Untuk Visualisasi & Analisis Sub-Sel) ──
             decomp = f2c.DECOMP_Boustrophedon()
             cells = decomp.decompose(raw_cells)
             self.get_logger().info(
@@ -319,29 +315,102 @@ class CoverageServer(Node):
             robot = f2c.Robot(robot_width, cov_width)
             robot.setMinTurningRadius(turning_radius)
 
-            # ── 5. Swaths Paralel Menghindari Rintangan Meja ──
-            # Menggunakan raw_cells yang sudah memiliki lubang rintangan meja (interior rings)
-            # agar Fields2Cover memotong swath di depan rintangan secara alami
-            sg = f2c.SG_BruteForce()
-            swaths = f2c.Swaths()
-            for k in range(raw_cells.size()):
-                c_sw = sg.generateSwaths(swath_angle, cov_width, raw_cells.getGeometry(k))
-                for s_i in range(c_sw.size()):
-                    swaths.push_back(c_sw[s_i])
-
-            if swaths.size() == 0:
-                ext_ring = f2c.LinearRing()
-                for px, py in poly_pts:
-                    ext_ring.addPoint(f2c.Point(float(px), float(py), 0.0))
-                ext_ring.addPoint(f2c.Point(float(poly_pts[0][0]), float(poly_pts[0][1]), 0.0))
-                field_cell = f2c.Cell()
-                field_cell.addRing(ext_ring)
-                swaths = sg.generateSwaths(swath_angle, cov_width, field_cell)
-
-            boustro = f2c.RP_Boustrophedon()
+            dense_step = 0.05
+            perim_poses = []
             robot_pose = self._get_robot_pose_from_tf()
             rx = robot_pose[0] if robot_pose else poly_pts[0][0]
             ry = robot_pose[1] if robot_pose else poly_pts[0][1]
+
+            hg = f2c.HG_Const_gen()
+
+            # ── 5. Fase 1: Perimeter / Headland Tour (Standar Robot Komersial) ──
+            # Mengitari tepi dinding luar ruangan dan mengitari rintangan meja
+            if enable_perimeter:
+                try:
+                    hl_swaths = hg.generateHeadlandSwaths(raw_cells, cov_width, 1)
+                    if hl_swaths and len(hl_swaths) > 0 and hl_swaths[0].size() > 0:
+                        for ci in range(hl_swaths[0].size()):
+                            cell_i = hl_swaths[0].getGeometry(ci)
+                            # HANYA proses ring 0 (Batas luar ruangan / perimeter dinding).
+                            # ABAIKAN ring >= 1 (lubang kaki meja) agar TIDAK ADA jalur belah ketupat di sekeliling tiang!
+                            if cell_i.size() == 0:
+                                continue
+                            ring = cell_i.getGeometry(0)
+                            if ring.size() < 3:
+                                continue
+                            raw_pts = [(ring.getGeometry(i).getX(), ring.getGeometry(i).getY()) for i in range(ring.size())]
+                            if math.hypot(raw_pts[0][0] - raw_pts[-1][0], raw_pts[0][1] - raw_pts[-1][1]) < 0.01:
+                                raw_pts = raw_pts[:-1]
+
+                                # Urutkan titik loop perimeter dimulai dari titik terdekat dengan robot
+                                best_idx = min(range(len(raw_pts)), key=lambda i: math.hypot(raw_pts[i][0] - rx, raw_pts[i][1] - ry))
+                                ordered = raw_pts[best_idx:] + raw_pts[:best_idx]
+                                ordered.append(ordered[0])  # Tutup loop 360°
+
+                                for i in range(len(ordered) - 1):
+                                    x1, y1 = ordered[i]
+                                    x2, y2 = ordered[i+1]
+                                    d = math.hypot(x2 - x1, y2 - y1)
+                                    n = max(1, int(d / dense_step))
+                                    yaw = math.atan2(y2 - y1, x2 - x1)
+                                    for j in range(n):
+                                        t = j / float(n)
+                                        p = PoseStamped()
+                                        p.header.frame_id = 'map'
+                                        p.header.stamp = self.get_clock().now().to_msg()
+                                        p.pose.position.x = x1 + t * (x2 - x1)
+                                        p.pose.position.y = y1 + t * (y2 - y1)
+                                        p.pose.orientation.z = math.sin(yaw / 2.0)
+                                        p.pose.orientation.w = math.cos(yaw / 2.0)
+                                        perim_poses.append(p)
+                        self.get_logger().info(
+                            f"🛡️  [FASE 1 - PERIMETER] Tour keliling batas & rintangan siap: {len(perim_poses)} waypoint.")
+                except Exception as e:
+                    self.get_logger().warn(f"⚠️ Gagal generate perimeter tour ({e}), fallback ke infill murni.")
+                    perim_poses = []
+
+            # ── 6. Fase 2: Infill Sweeping di Area Tengah yang Bersih ──
+            # Menghitung inner_field yang sudah dikurangi headland (margin cov_width * 0.5 dari dinding & rintangan)
+            inner_field = None
+            if enable_perimeter and len(perim_poses) > 0:
+                try:
+                    inner_cand = hg.generateHeadlands(raw_cells, cov_width * 0.5)
+                    if inner_cand.size() > 0 and inner_cand.area() > 0.15:
+                        inner_field = inner_cand
+                except Exception:
+                    inner_field = None
+
+            target_cells = inner_field if inner_field is not None else raw_cells
+
+            sg = f2c.SG_BruteForce()
+            swaths = f2c.Swaths()
+            obj_n = f2c.OBJ_NSwath()
+            for k in range(target_cells.size()):
+                try:
+                    if abs(swath_angle) > 1e-4:
+                        c_sw = sg.generateSwaths(swath_angle, cov_width, target_cells.getGeometry(k))
+                    else:
+                        c_sw = sg.generateBestSwaths(obj_n, cov_width, target_cells.getGeometry(k))
+                except Exception:
+                    c_sw = sg.generateSwaths(swath_angle, cov_width, target_cells.getGeometry(k))
+                for s_i in range(c_sw.size()):
+                    if c_sw[s_i].length() >= 0.20:  # Filter micro-swaths
+                        swaths.push_back(c_sw[s_i])
+
+            if swaths.size() == 0:
+                # Fallback ke raw cells jika inner_field terlalu sempit
+                for k in range(raw_cells.size()):
+                    try:
+                        c_sw = sg.generateBestSwaths(obj_n, cov_width, raw_cells.getGeometry(k))
+                    except Exception:
+                        c_sw = sg.generateSwaths(swath_angle, cov_width, raw_cells.getGeometry(k))
+                    for s_i in range(c_sw.size()):
+                        if c_sw[s_i].length() >= 0.20:
+                            swaths.push_back(c_sw[s_i])
+
+            boustro = f2c.RP_Boustrophedon()
+            ref_x = perim_poses[-1].pose.position.x if perim_poses else rx
+            ref_y = perim_poses[-1].pose.position.y if perim_poses else ry
 
             best_v = 0
             min_d = float('inf')
@@ -349,29 +418,89 @@ class CoverageServer(Node):
                 test_sw = boustro.genSortedSwaths(swaths, v)
                 if test_sw.size() > 0:
                     sp = test_sw[0].startPoint()
-                    d = math.hypot(sp.getX() - rx, sp.getY() - ry)
+                    d = math.hypot(sp.getX() - ref_x, sp.getY() - ref_y)
                     if d < min_d:
                         min_d = d
                         best_v = v
 
             sorted_sw = boustro.genSortedSwaths(swaths, best_v)
-            p_start = sorted_sw[0].startPoint()
-            p_end = sorted_sw[sorted_sw.size() - 1].endPoint()
+
+            # Perencanaan Jalur Infill Bersih untuk Robot Differential Drive (Tanpa Omega Loop Traktor)
+            infill_poses = []
+            for i in range(sorted_sw.size()):
+                s = sorted_sw[i]
+                if s.length() < 0.20:
+                    continue
+                x1, y1 = s.startPoint().getX(), s.startPoint().getY()
+                x2, y2 = s.endPoint().getX(), s.endPoint().getY()
+                d = math.hypot(x2 - x1, y2 - y1)
+                n = max(1, int(d / dense_step))
+                yaw = math.atan2(y2 - y1, x2 - x1)
+                for j in range(n + 1):
+                    t = j / float(n)
+                    p = PoseStamped()
+                    p.header.frame_id = 'map'
+                    p.header.stamp = self.get_clock().now().to_msg()
+                    p.pose.position.x = x1 + t * (x2 - x1)
+                    p.pose.position.y = y1 + t * (y2 - y1)
+                    p.pose.orientation.z = math.sin(yaw / 2.0)
+                    p.pose.orientation.w = math.cos(yaw / 2.0)
+                    infill_poses.append(p)
+
+                # Sambungan lurus bersih ke baris berikutnya (U-turn langsung tanpa omega loops)
+                if i < sorted_sw.size() - 1:
+                    next_s = sorted_sw[i + 1]
+                    nx, ny = next_s.startPoint().getX(), next_s.startPoint().getY()
+                    td = math.hypot(nx - x2, ny - y2)
+                    tn = max(1, int(td / dense_step))
+                    tyaw = math.atan2(ny - y2, nx - x2)
+                    for j in range(1, tn):
+                        t = j / float(tn)
+                        p = PoseStamped()
+                        p.header.frame_id = 'map'
+                        p.header.stamp = self.get_clock().now().to_msg()
+                        p.pose.position.x = x2 + t * (nx - x2)
+                        p.pose.position.y = y2 + t * (ny - y2)
+                        p.pose.orientation.z = math.sin(tyaw / 2.0)
+                        p.pose.orientation.w = math.cos(tyaw / 2.0)
+                        infill_poses.append(p)
+
+            infill_ros = Path()
+            infill_ros.header.frame_id = 'map'
+            infill_ros.header.stamp = self.get_clock().now().to_msg()
+            infill_ros.poses = infill_poses
+
             self.get_logger().info(
-                f"🚜 Swaths Paralel Bebas-Persilangan: {sorted_sw.size()} baris terurut "
-                f"| Titik Pangkal Terluar: ({p_start.getX():.2f}, {p_start.getY():.2f}) "
-                f"| End: ({p_end.getX():.2f}, {p_end.getY():.2f}).")
+                f"🚜 [FASE 2 - INFILL] Swaths Paralel Bersih: {sorted_sw.size()} baris terurut, {len(infill_poses)} waypoint.")
 
-            # ── 6. Path Planning (Dubins Curves Kontinu Bebas Persilangan) ──
-            pp = f2c.PP_PathPlanning()
-            dubins = f2c.PP_DubinsCurves()
-            f2c_path = pp.planPath(robot, sorted_sw, dubins)
-            self.get_logger().info(f"📍 Path Dubins: {f2c_path.size()} titik (panjang {f2c_path.length():.2f}m)")
+            # ── 7. Sambungkan Fase 1 (Perimeter) ke Fase 2 (Infill) Secara Mulus ──
+            trans_poses = []
+            if perim_poses and infill_ros.poses:
+                p_last = perim_poses[-1].pose.position
+                p_first = infill_ros.poses[0].pose.position
+                d_trans = math.hypot(p_first.x - p_last.x, p_first.y - p_last.y)
+                n_trans = max(1, int(d_trans / dense_step))
+                yaw_trans = math.atan2(p_first.y - p_last.y, p_first.x - p_last.x)
+                for j in range(n_trans):
+                    t = j / float(n_trans)
+                    p = PoseStamped()
+                    p.header.frame_id = 'map'
+                    p.header.stamp = self.get_clock().now().to_msg()
+                    p.pose.position.x = p_last.x + t * (p_first.x - p_last.x)
+                    p.pose.position.y = p_last.y + t * (p_first.y - p_last.y)
+                    p.pose.orientation.z = math.sin(yaw_trans / 2.0)
+                    p.pose.orientation.w = math.cos(yaw_trans / 2.0)
+                    trans_poses.append(p)
 
-            # ── 7. Konversi ke ROS 2 Path ──
-            ros_path = self._f2c_path_to_ros(f2c_path)
+            combined_poses = perim_poses + trans_poses + infill_ros.poses
+            perim_count = len(perim_poses)
 
-            # ── 9b. Filter waypoint dalam polygon rintangan (kaki meja + clearance) ──
+            ros_path = Path()
+            ros_path.header.frame_id = 'map'
+            ros_path.header.stamp = self.get_clock().now().to_msg()
+            ros_path.poses = combined_poses
+
+            # ── 8. Filter waypoint dalam polygon rintangan (kaki meja + clearance) ──
             if obstacles:
                 valid_poses = []
                 num_dropped = 0
@@ -393,11 +522,11 @@ class CoverageServer(Node):
                         f"({len(valid_poses)} tersisa).")
                     ros_path.poses = valid_poses
 
-            # ── 9c. Filter waypoint dalam obstacle costmap (jika ada) ──
+            # ── 9. Filter waypoint dalam obstacle costmap (jika ada) ──
             ros_path = self._filter_obstacle_waypoints(ros_path)
 
-            # ── 10. Visualisasi Markers & Publish (Jalur + Batas Tiap Sub-Sel) ──
-            path_markers = self.vis.create_path_markers(f2c_path)
+            # ── 10. Visualisasi Markers & Publish ──
+            path_markers = self.vis.create_path_markers(ros_path, perim_count)
             cell_markers = self.vis.create_cells_markers(cells)
             all_markers = MarkerArray()
             all_markers.markers.extend(path_markers.markers)
@@ -408,7 +537,8 @@ class CoverageServer(Node):
             self.path_pub.publish(ros_path)
             self.marker_pub.publish(all_markers)
 
-            return True, f"Coverage Path Paralel Bebas-Persilangan ({cells.size()} sub-sel, {sorted_sw.size()} swaths, {len(ros_path.poses)} waypoints)"
+            return True, (f"Commercial Coverage Path Siap: {len(perim_poses)} waypoint Perimeter (Fase 1) "
+                          f"+ {len(infill_ros.poses)} waypoint Infill (Fase 2) | Total: {len(ros_path.poses)} poses")
 
         except Exception as e:
             import traceback
@@ -479,8 +609,15 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

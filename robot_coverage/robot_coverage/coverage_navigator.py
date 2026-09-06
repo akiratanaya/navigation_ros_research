@@ -17,6 +17,7 @@ Fitur:
 import math
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import ExternalShutdownException
 from rclpy.action import ActionClient
 from action_msgs.msg import GoalStatus
 from nav_msgs.msg import Path
@@ -205,13 +206,13 @@ class CoverageNavigator(Node):
             x = r * math.cos(angle)
             y = r * math.sin(angle)
 
-            # 1. Koridor depan robot: lebar bodi +/- 0.20m (lebar robot 0.306m + margin aman)
-            if x > 0.05 and abs(y) <= 0.20:
+            # 1. Koridor depan robot: lebar bodi +/- 0.14m (lebar robot 0.306m -> 0.153m)
+            if x > 0.05 and abs(y) <= 0.14:
                 if x < min_front_x:
                     min_front_x = x
 
             # 2. Koridor belakang robot (untuk proteksi saat mundur):
-            if x < -0.05 and abs(y) <= 0.20:
+            if x < -0.05 and abs(y) <= 0.14:
                 if abs(x) < min_rear_x:
                     min_rear_x = abs(x)
 
@@ -520,12 +521,16 @@ class CoverageNavigator(Node):
 
         self._send_coverage_path(self._active_coverage_poses)
 
-    def _send_coverage_path(self, poses: list):
-        """Kirim seluruh sisa jalur coverage ke Nav2 FollowPath."""
-        if not poses:
-            self.get_logger().info("🎉 Seluruh urutan misi coverage selesai tuntas 100%!")
+    def _send_coverage_path(self, poses: list = None):
+        """Kirim segmen chunk maju (maks 35 waypoint, ~1.75m) ke Nav2 FollowPath."""
+        if poses is not None:
+            self._active_coverage_poses = list(poses)
+
+        if not self._active_coverage_poses:
+            self.get_logger().info("🎉 [SUKSES] Seluruh urutan misi coverage selesai tuntas 100%!")
             self.stop_robot()
             self.is_navigating = False
+            self.current_stage = 'IDLE'
             return
 
         if not self._follow_path_client.wait_for_server(timeout_sec=15.0):
@@ -533,10 +538,20 @@ class CoverageNavigator(Node):
             self.is_navigating = False
             return
 
+        n_poses = len(self._active_coverage_poses)
+        # Ambil chunk maju: maks 35 waypoint (~1.75m lookahead)
+        chunk_len = min(n_poses, 35)
+        chunk_poses = self._active_coverage_poses[:chunk_len]
+        self._current_chunk_size = chunk_len
+
+        self.get_logger().info(
+            f"🚀 [CHUNKING] Mengirim segmen aktif: {chunk_len} waypoint "
+            f"(Total antrean sisa: {n_poses} waypoint)...")
+
         path_msg = Path()
         path_msg.header.frame_id = 'map'
         path_msg.header.stamp = self.get_clock().now().to_msg()
-        path_msg.poses = poses
+        path_msg.poses = chunk_poses
         fresh = self.refresh_path_timestamps(path_msg)
 
         if self._coverage_goal_handle is not None:
@@ -562,8 +577,9 @@ class CoverageNavigator(Node):
             self.stop_robot()
             return
 
+        chunk_size = getattr(self, '_current_chunk_size', len(self._active_coverage_poses))
         self.get_logger().info(
-            f"✅ Nav2 Coverage Controller aktif! Robot mulai menyapu ({len(self._active_coverage_poses)} waypoints tersisa).")
+            f"✅ Nav2 Coverage Controller aktif! Menyapu segmen aktif ({chunk_size} wp, total antrean: {len(self._active_coverage_poses)} wp).")
         self._coverage_goal_handle = gh
         result_future = gh.get_result_async()
         result_future.add_done_callback(lambda f, handle=gh: self._on_coverage_done(f, handle))
@@ -592,36 +608,24 @@ class CoverageNavigator(Node):
                 f"📍 [COVERAGE NAV2] Sisa: {dist:.2f}m | Kecepatan: {speed:.2f}m/s | Obstacle Avoidance Aktif",
                 throttle_duration_sec=3.0)
 
-            # ── 1. Update Indeks Progres Secara Sekuensial Monotonik ──
+            # ── 1. Update Indeks Progres Secara Sekuensial Monotonik di dalam Chunk Aktif ──
             if self._active_coverage_poses:
                 robot_pose = self.get_robot_pose()
                 if robot_pose is not None:
                     rx, ry, _ = robot_pose
-                    poses = list(self._active_coverage_poses)
+                    chunk_size = getattr(self, '_current_chunk_size', len(self._active_coverage_poses))
+                    poses = list(self._active_coverage_poses[:chunk_size])
                     n_poses = len(poses)
                     cur_idx = max(0, min(self._coverage_progress_idx, n_poses - 1)) if n_poses > 0 else 0
-                    # Cari titik terdekat hanya di jendela maju lokal [cur_idx, cur_idx + 6] (maks 30 cm)
-                    # Jendela super ketat menjamin robot maju teratur satu per satu tanpa pernah meloncat
-                    search_end = min(n_poses, cur_idx + 6)
+                    search_end = min(n_poses, cur_idx + 25)
                     if cur_idx < search_end:
                         best_local_idx = min(
                             range(cur_idx, search_end),
                             key=lambda i: math.hypot(poses[i].pose.position.x - rx, poses[i].pose.position.y - ry)
                         )
                         d = math.hypot(poses[best_local_idx].pose.position.x - rx, poses[best_local_idx].pose.position.y - ry)
-                        if d < 0.25 and best_local_idx > cur_idx:
+                        if d < 0.40 and best_local_idx > cur_idx:
                             self._coverage_progress_idx = best_local_idx
-
-                    # Pangkas waypoint yang sudah dilalui dan segarkan /coverage_path
-                    # agar di RViz garis waypoint yang sudah selesai otomatis menghilang
-                    if self._coverage_progress_idx >= 5 and len(self._active_coverage_poses) > self._coverage_progress_idx:
-                        self._active_coverage_poses = self._active_coverage_poses[self._coverage_progress_idx:]
-                        self._coverage_progress_idx = 0
-                        rem_msg = Path()
-                        rem_msg.header.frame_id = 'map'
-                        rem_msg.header.stamp = self.get_clock().now().to_msg()
-                        rem_msg.poses = self._active_coverage_poses
-                        self.coverage_path_pub.publish(rem_msg)
 
             # ── 2. Deteksi Rintangan Nyata & Manuver Responsif ──
             if elapsed < 1.5:
@@ -635,6 +639,7 @@ class CoverageNavigator(Node):
             if len(self._active_coverage_poses) > 5 and (now_sec - self._last_detour_time > 2.0):
                 robot_pose = self.get_robot_pose()
                 trans_moved = 0.1
+                yaw_rate = 0.0
                 dt = 0.0
 
                 if robot_pose is not None:
@@ -644,34 +649,45 @@ class CoverageNavigator(Node):
                         dt = now_sec - ltime
                         if dt >= 0.4:
                             trans_moved = math.hypot(rx - lx, ry - ly)
+                            d_yaw = abs(math.atan2(math.sin(ryaw - lyaw), math.cos(ryaw - lyaw)))
+                            yaw_rate = d_yaw / dt if dt > 0 else 0.0
                             self._last_check_pose = (rx, ry, ryaw, now_sec)
                     else:
                         self._last_check_pose = (rx, ry, ryaw, now_sec)
 
                 has_near_obs, obs_side, d_front, d_left, d_right, d_rear = self.analyze_obstacles()
 
-                # Kondisi kritis: Rintangan berjarak <= 12 cm di depan bumper (d_front <= 0.26)
-                # ATAU rintangan samping/sudut berjarak <= 7 cm dari bodi (d_left <= 0.22 atau d_right <= 0.22):
-                critical_front_obs = (d_front <= 0.26 or d_left <= 0.22 or d_right <= 0.22)
+                # Kondisi kritis: Rintangan frontal berjarak <= 11 cm di depan bumper (d_front <= 0.25)
+                # Refleks seketika HANYA dipicu oleh rintangan FRONTAL di koridor depan robot.
+                # Rintangan samping (dinding paralel) TIDAK memicu refleks seketika agar robot
+                # dapat menyusuri dinding (Perimeter Tour) dengan tenang tanpa false alarm.
+                critical_front_obs = (d_front <= 0.25)
 
                 is_stuck = False
                 if critical_front_obs:
                     self.get_logger().warn(
-                        f"🚨 Rintangan dekat bodi (F={d_front:.2f}m, L={d_left:.2f}m, R={d_right:.2f}m)! Refleks aktif seketika!")
+                        f"🚨 Rintangan tepat di depan bumper (F={d_front:.2f}m)! Refleks darurat aktif seketika!")
                     is_stuck = True
                 elif dt >= 0.4:
-                    # Pertimbangkan gerak robot: translasi < 0.04m ATAU kecepatan Nav2 < 0.06m/s
-                    is_low_progress = (trans_moved < 0.04 or speed < 0.06)
+                    # Cek apakah robot sedang aktif berputar haluan (misal rotate-to-heading Nav2)
+                    is_rotating = (yaw_rate > 0.15)
 
-                    if is_low_progress:
+                    # Pertimbangkan gerak robot: translasi < 0.03m ATAU kecepatan Nav2 < 0.05m/s
+                    is_low_progress = (trans_moved < 0.03 or speed < 0.05)
+
+                    if is_rotating:
+                        # Robot sedang aktif berputar haluan secara normal (misal belok di ujung swath).
+                        # Bukan stuck! Turunkan tick stuck.
+                        self._coverage_stuck_ticks = max(0, self._coverage_stuck_ticks - 1)
+                    elif is_low_progress:
                         self._coverage_stuck_ticks += 1
-                        # Kasus A: Ada rintangan dalam jarak dekat (has_near_obs) dan terhambat 2 tick (~0.8s)
-                        if has_near_obs and self._coverage_stuck_ticks >= 2:
+                        # Kasus A: Ada rintangan di koridor depan (d_front <= 0.35m) dan terhambat >= 4 tick (~1.6s)
+                        if d_front <= 0.35 and self._coverage_stuck_ticks >= 4:
                             self.get_logger().warn(
-                                f"⚠️ Robot terhambat rintangan di sisi {obs_side} (min: F={d_front:.2f}m, L={d_left:.2f}m, R={d_right:.2f}m).")
+                                f"⚠️ Robot terhambat rintangan depan (F={d_front:.2f}m, stuck {self._coverage_stuck_ticks * 0.4:.1f}s).")
                             is_stuck = True
-                        # Kasus B: Robot macet tidak bergerak selama 4 tick (~1.6s)
-                        elif self._coverage_stuck_ticks >= 4:
+                        # Kasus B: Robot macet total tidak bergerak sama sekali selama >= 7 tick (~2.8s)
+                        elif self._coverage_stuck_ticks >= 7:
                             self.get_logger().warn(
                                 f"⚠️ Robot macet tidak bergerak selama {self._coverage_stuck_ticks * 0.4:.1f}s.")
                             is_stuck = True
@@ -769,7 +785,7 @@ class CoverageNavigator(Node):
             # w = turn_dir * 1.3 rad/s selama 0.65 detik
             # Active Guard: Hentikan putaran jika sisi arah putar mendekati objek (< 0.23m)
             turning_side_clearance = d_right if self._maneuver_turn_dir < 0 else d_left
-            if elapsed < 0.65 and turning_side_clearance > 0.23:
+            if elapsed < 0.65 and turning_side_clearance > 0.19:
                 twist.linear.x = 0.0
                 twist.angular.z = self._maneuver_turn_dir * 1.3
                 self.cmd_vel_pub.publish(twist)
@@ -909,37 +925,49 @@ class CoverageNavigator(Node):
             return  # Sedang bermanuver detour, jangan batalkan misi
 
         status = future.result().status
-        poses = self._active_coverage_poses
-        cur_idx = self._coverage_progress_idx
 
-        # Proteksi False Arrival: Cek apakah seluruh sekuens coverage benar-benar sudah dituntaskan
+        # Proteksi False Arrival & Chunk Progression
         if status == GoalStatus.STATUS_SUCCEEDED:
-            remaining_count = len(poses) - cur_idx if poses else 0
-            if remaining_count > 10:
-                self.get_logger().warn(
-                    f"⚠️ Nav2 GoalChecker declare SUCCEEDED prematur! Masih ada {remaining_count} waypoint tersisa. "
-                    f"Melanjutkan eksekusi sisa {remaining_count} waypoint...")
-                rem_poses = poses[cur_idx:]
-                self._active_coverage_poses = rem_poses
+            chunk_len = getattr(self, '_current_chunk_size', len(self._active_coverage_poses))
+            
+            # Jika masih ada sisa waypoint di antrean melebihi chunk saat ini:
+            if len(self._active_coverage_poses) > chunk_len:
+                # Sisakan 2 waypoint overlap agar controller menyambung dengan mulus tanpa jeda tajam
+                advance = max(1, chunk_len - 2)
+                self._active_coverage_poses = self._active_coverage_poses[advance:]
                 self._coverage_progress_idx = 0
-                self._send_coverage_path(rem_poses)
+
+                # Segarkan visualisasi sisa jalur di RViz
+                rem_msg = Path()
+                rem_msg.header.frame_id = 'map'
+                rem_msg.header.stamp = self.get_clock().now().to_msg()
+                rem_msg.poses = self._active_coverage_poses
+                self.coverage_path_pub.publish(rem_msg)
+
+                self.get_logger().info(
+                    f"✅ Segmen berhasil disapu! Melanjutkan ke segmen berikutnya ({len(self._active_coverage_poses)} wp tersisa)...")
+                self._send_coverage_path()
                 return
 
+            self._active_coverage_poses = []
+            self._coverage_progress_idx = 0
             self.is_navigating = False
             self.stop_robot()
+            self.current_stage = 'IDLE'
             self.get_logger().info("🎉 [SUKSES] Seluruh Sequence Misi Coverage Selesai 100% tanpa tabrakan!")
 
         elif status == GoalStatus.STATUS_ABORTED:
-            remaining_count = len(poses) - cur_idx if poses else 0
-            if remaining_count > 10:
+            remaining_count = len(self._active_coverage_poses)
+            if remaining_count > 5:
                 self.get_logger().warn(
-                    f"⚠️ Controller mengaborsi jalur (sisa {remaining_count} waypoint). "
+                    f"⚠️ Controller mengaborsi segmen (sisa antrean {remaining_count} waypoint). "
                     f"Menjalankan Manuver Maju-Mundur untuk mundur dan meloloskan diri dari rintangan...")
                 has_near_obs, obs_side, d_front, d_left, d_right, d_rear = self.analyze_obstacles()
                 self._start_maju_mundur_maneuver(obs_side, d_front, d_left, d_right)
             else:
                 self.is_navigating = False
                 self.stop_robot()
+                self.current_stage = 'IDLE'
                 self.get_logger().info("🎉 Misi coverage selesai di ujung akhir jalur.")
 
         elif status == GoalStatus.STATUS_CANCELED:
@@ -948,6 +976,7 @@ class CoverageNavigator(Node):
         else:
             self.is_navigating = False
             self.stop_robot()
+            self.current_stage = 'IDLE'
             self.get_logger().warn(f"⚠️ Coverage selesai dengan status: {status}")
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -984,12 +1013,19 @@ def main(args=None):
     node = CoverageNavigator()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.stop_robot()
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.stop_robot()
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

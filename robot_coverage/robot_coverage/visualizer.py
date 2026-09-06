@@ -7,29 +7,86 @@ class Visualizer:
     def __init__(self, frame_id: str = "map"):
         self.frame_id = frame_id
 
-    def create_path_markers(self, f2c_path: f2c.Path) -> MarkerArray:
+    def create_path_markers(self, path_obj, perim_count: int = 0) -> MarkerArray:
         marker_array = MarkerArray()
-        
-        line_marker = Marker()
-        line_marker.header.frame_id = self.frame_id
-        line_marker.ns = "coverage_trajectory"
-        line_marker.id = 0
-        line_marker.type = Marker.LINE_STRIP
-        line_marker.action = Marker.ADD
-        line_marker.scale.x = 0.15  # Ketebalan garis di RViz
-        
-        # Warna Hijau Toska
-        line_marker.color = ColorRGBA(r=0.0, g=0.8, b=0.8, a=1.0)
 
-        for i in range(f2c_path.size()):
-            state = f2c_path.getState(i)
-            p = Point()
-            p.x = state.point.getX()
-            p.y = state.point.getY()
-            p.z = 0.0
-            line_marker.points.append(p)
+        if hasattr(path_obj, 'poses'):
+            # nav_msgs/Path
+            poses = path_obj.poses
+            if not poses:
+                return marker_array
 
-        marker_array.markers.append(line_marker)
+            if perim_count > 0 and perim_count <= len(poses):
+                # 1. Perimeter Marker (Biru Toska / Cyan)
+                p_marker = Marker()
+                p_marker.header.frame_id = self.frame_id
+                p_marker.ns = "coverage_perimeter"
+                p_marker.id = 0
+                p_marker.type = Marker.LINE_STRIP
+                p_marker.action = Marker.ADD
+                p_marker.scale.x = 0.12
+                p_marker.color = ColorRGBA(r=0.0, g=0.85, b=0.95, a=1.0)
+                for p in poses[:perim_count]:
+                    pt = Point()
+                    pt.x = p.pose.position.x
+                    pt.y = p.pose.position.y
+                    pt.z = 0.015
+                    p_marker.points.append(pt)
+                marker_array.markers.append(p_marker)
+
+                # 2. Infill Marker (Hijau Stabilo / Lime Green)
+                i_marker = Marker()
+                i_marker.header.frame_id = self.frame_id
+                i_marker.ns = "coverage_infill"
+                i_marker.id = 1
+                i_marker.type = Marker.LINE_STRIP
+                i_marker.action = Marker.ADD
+                i_marker.scale.x = 0.10
+                i_marker.color = ColorRGBA(r=0.2, g=0.95, b=0.2, a=1.0)
+                for p in poses[perim_count:]:
+                    pt = Point()
+                    pt.x = p.pose.position.x
+                    pt.y = p.pose.position.y
+                    pt.z = 0.015
+                    i_marker.points.append(pt)
+                marker_array.markers.append(i_marker)
+            else:
+                line_marker = Marker()
+                line_marker.header.frame_id = self.frame_id
+                line_marker.ns = "coverage_trajectory"
+                line_marker.id = 0
+                line_marker.type = Marker.LINE_STRIP
+                line_marker.action = Marker.ADD
+                line_marker.scale.x = 0.12
+                line_marker.color = ColorRGBA(r=0.0, g=0.85, b=0.85, a=1.0)
+                for p in poses:
+                    pt = Point()
+                    pt.x = p.pose.position.x
+                    pt.y = p.pose.position.y
+                    pt.z = 0.015
+                    line_marker.points.append(pt)
+                marker_array.markers.append(line_marker)
+            return marker_array
+
+        elif hasattr(path_obj, 'size'):
+            # f2c.Path
+            line_marker = Marker()
+            line_marker.header.frame_id = self.frame_id
+            line_marker.ns = "coverage_trajectory"
+            line_marker.id = 0
+            line_marker.type = Marker.LINE_STRIP
+            line_marker.action = Marker.ADD
+            line_marker.scale.x = 0.15
+            line_marker.color = ColorRGBA(r=0.0, g=0.8, b=0.8, a=1.0)
+            for i in range(path_obj.size()):
+                state = path_obj.getState(i)
+                p = Point()
+                p.x = state.point.getX()
+                p.y = state.point.getY()
+                p.z = 0.0
+                line_marker.points.append(p)
+            marker_array.markers.append(line_marker)
+            return marker_array
         return marker_array
 
     def create_cells_markers(self, cells: f2c.Cells) -> MarkerArray:
