@@ -226,7 +226,7 @@ global_costmap:
       global_frame: map
       inflation_layer:
         cost_scaling_factor: 25.0
-        inflation_radius: 0.28
+        inflation_radius: 0.18
         plugin: nav2_costmap_2d::InflationLayer
       obstacle_layer:
         enabled: true
@@ -249,7 +249,7 @@ global_costmap:
       publish_frequency: 1.0
       resolution: 0.05
       robot_base_frame: base_footprint
-      robot_radius: 0.17
+      robot_radius: 0.155
       static_layer:
         map_subscribe_transient_local: true
         plugin: nav2_costmap_2d::StaticLayer
@@ -263,7 +263,7 @@ local_costmap:
       height: 4
       inflation_layer:
         cost_scaling_factor: 25.0
-        inflation_radius: 0.28
+        inflation_radius: 0.18
         plugin: nav2_costmap_2d::InflationLayer
       plugins:
       - voxel_layer
@@ -271,7 +271,7 @@ local_costmap:
       publish_frequency: 5.0
       resolution: 0.05
       robot_base_frame: base_footprint
-      robot_radius: 0.17
+      robot_radius: 0.155
       rolling_window: true
       static_layer:
         map_subscribe_transient_local: true
