@@ -14,7 +14,7 @@ Panels:
         - /Swept Footprint Trail1
         - /Map2
       Splitter Ratio: 0.5
-    Tree Height: 284
+    Tree Height: 481
   - Class: rviz_common/Selection
     Name: Selection
   - Class: rviz_common/Views
@@ -70,7 +70,7 @@ Visualization Manager:
       Enabled: true
       Name: Boundary Preview
       Namespaces:
-        {}
+        field_boundary_preview: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -124,19 +124,24 @@ Visualization Manager:
       Enabled: true
       Name: Coverage Markers
       Namespaces:
-        {}
+        coverage_endpoints: true
+        coverage_infill: true
+        coverage_obstacles: true
+        coverage_perimeter: true
+        decomposed_cell_borders: true
+        decomposed_cell_labels: true
       Topic:
         Depth: 5
-        Durability Policy: Volatile
+        Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: visualization_marker_array
+        Value: /coverage_markers
       Value: true
     - Class: rviz_default_plugins/Marker
       Enabled: true
       Name: Swept Footprint Trail
       Namespaces:
-        {}
+        swept_footprint: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -343,7 +348,7 @@ Visualization Manager:
       Binary representation: false
       Binary threshold: 100
       Class: rviz_default_plugins/Map
-      Color Scheme: map
+      Color Scheme: costmap
       Draw Behind: false
       Enabled: true
       Name: Map
@@ -417,7 +422,7 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 97.11752319335938
+      Scale: 69.17208862304688
       Target Frame: <Fixed Frame>
       Value: TopDownOrtho (rviz_default_plugins)
       X: 0
@@ -425,15 +430,15 @@ Visualization Manager:
     Saved: ~
 Window Geometry:
   Displays:
-    collapsed: false
-  Height: 513
-  Hide Left Dock: false
+    collapsed: true
+  Height: 482
+  Hide Left Dock: true
   Hide Right Dock: false
-  QMainWindow State: 000000ff00000000fd000000010000000000000156000001a7fc0200000003fb000000100044006900730070006c006100790073010000003d000001a7000000c900fffffffb0000001200530065006c0065006300740069006f006e00000000e30000005c0000005c00fffffffb0000000a005600690065007700730000000114000000d0000000a400ffffff0000025a000001a700000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000100000000000001560000026cfc0200000003fb000000100044006900730070006c006100790073000000003d0000026c000000c900fffffffb0000001200530065006c0065006300740069006f006e00000000e30000005c0000005c00fffffffb0000000a005600690065007700730000000114000000d0000000a400ffffff000003760000018800000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Selection:
     collapsed: false
   Views:
     collapsed: false
-  Width: 950
-  X: 964
+  Width: 886
+  X: 6
   Y: 40

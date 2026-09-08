@@ -32,6 +32,7 @@ import fields2cover as f2c
 
 from nav_msgs.msg import Path, OccupancyGrid
 from geometry_msgs.msg import PoseStamped, PolygonStamped
+from std_msgs.msg import Int32
 from visualization_msgs.msg import MarkerArray
 from std_srvs.srv import Trigger
 import numpy as np
@@ -64,11 +65,14 @@ class CoverageServer(Node):
 
         self.path_pub = self.create_publisher(Path, '/coverage_path', latch_qos)
         self.marker_pub = self.create_publisher(MarkerArray, '/coverage_markers', latch_qos)
+        self.vis_marker_pub = self.create_publisher(MarkerArray, 'visualization_marker_array', latch_qos)
+        self.perim_count_pub = self.create_publisher(Int32, '/perimeter_waypoint_count', latch_qos)
         self.srv = self.create_service(Trigger, 'compute_coverage_path', self.compute_path_cb)
 
         self.vis = Visualizer(frame_id='map')
         self.last_path = None
         self.last_markers = None
+        self._last_perim_count = None
         self.current_field_polygon = None
         self.current_map: OccupancyGrid | None = None
 
@@ -176,6 +180,9 @@ class CoverageServer(Node):
     def republish_cb(self):
         if self.last_markers is not None:
             self.marker_pub.publish(self.last_markers)
+            self.vis_marker_pub.publish(self.last_markers)
+        if self._last_perim_count is not None:
+            self.perim_count_pub.publish(Int32(data=int(self._last_perim_count)))
 
     # ══════════════════════════════════════════════════════════════════════════
     #  OBSTACLE EXTRACTION FROM /map
@@ -183,12 +190,13 @@ class CoverageServer(Node):
 
     def _extract_obstacle_polygons(self, poly_pts):
         """
-        Ekstrak rintangan interior (kaki-kaki samping meja) secara realistis.
-        Menghubungkan kaki depan & belakang (searah Y / 0.95m) menjadi 2 panel samping meja,
-        sementara koridor tengah (kolong meja 1.40m) tetap 100% terbuka bebas untuk disapu.
+        Ekstrak rintangan interior (kaki-kaki meja) dari peta OccupancyGrid.
+        Mengembalikan:
+            obs_polygons: list ShapelyPolygon
+            obs_circles: list of (center_x, center_y, safe_radius)
         """
         if self.current_map is None:
-            return []
+            return [], []
 
         info = self.current_map.info
         res = info.resolution
@@ -213,35 +221,115 @@ class CoverageServer(Node):
         occ_interior[(map_arr > 50) & (interior_mask == 255)] = 255
 
         if np.count_nonzero(occ_interior) == 0:
-            return []
+            return [], []
 
-        # Inflasi clearance kaki meja secukupnya (0.08m agar bodi robot bebas tabrakan tapi kolong meja tetap terbuka luas)
-        dilate_k = max(3, int(0.08 / res) * 2 + 1)
+        # Dilasi secukupnya untuk menghubungkan pixel rintangan satu tiang
+        dilate_k = max(3, int(0.04 / res) * 2 + 1)
         inflated = cv2.dilate(
             occ_interior, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilate_k, dilate_k)))
-        
+
         contours, _ = cv2.findContours(inflated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        obs_list = []
+        obs_polygons = []
+        obs_circles = []
         for cnt in contours:
             area = cv2.contourArea(cnt) * (res * res)
-            if area >= 0.005:  # Filter noise sangat kecil (kaki meja ~0.01m² - 0.03m²)
+            if area >= 0.003:  # Filter noise sangat kecil (tiang meja ~0.005m² - 0.05m²)
                 hull = cv2.convexHull(cnt)
                 rect = cv2.minAreaRect(hull)
                 box_pts = cv2.boxPoints(rect)
                 world_pts = [(float(pt[0]) * res + ox, float(pt[1]) * res + oy) for pt in box_pts]
                 obs_poly = ShapelyPolygon(world_pts).buffer(0)
+
+                cx = rect[0][0] * res + ox
+                cy = rect[0][1] * res + oy
+                raw_r = max(rect[1][0], rect[1][1]) * 0.5 * res
+                # safe_r: robot radius (0.155m) + clearance (0.025m) = 0.18m
+                safe_r = max(0.18, raw_r + 0.12)
+
                 if obs_poly.is_valid and not obs_poly.is_empty:
                     self.get_logger().info(
-                        f"🛡️ Rintangan tiang interior: luas={area:.3f}m² pada posisi ({rect[0][0]*res+ox:.2f}, {rect[0][1]*res+oy:.2f})")
-                    obs_list.append(obs_poly)
-        return obs_list
-    
+                        f"🛡️ Rintangan tiang interior: luas={area:.3f}m² pada posisi ({cx:.2f}, {cy:.2f}), safe_r={safe_r:.2f}m")
+                    obs_polygons.append(obs_poly)
+                    obs_circles.append((cx, cy, safe_r))
+        return obs_polygons, obs_circles
+
+    def _bypass_segment(self, x1, y1, x2, y2, obs_circles, field_poly, dense_step=0.04):
+        """
+        Generate titik-titik diskret sepanjang segmen lurus (x1, y1) -> (x2, y2).
+        Jika ada rintangan tiang (kaki meja), jalur secara mulus melengkung
+        (smooth circular arc) melingkari rintangan pada jarak safe_radius,
+        menjaga sapuan swath tetap utuh, rapi, sejajar, tanpa potongan diagonal.
+        """
+        d = math.hypot(x2 - x1, y2 - y1)
+        if d < 1e-4:
+            return [(x1, y1)]
+        n = max(1, int(d / dense_step))
+        ux = (x2 - x1) / d
+        uy = (y2 - y1) / d
+        nx = -uy
+        ny = ux
+        pts = []
+        for j in range(n + 1):
+            t = j / float(n)
+            px = x1 + t * (x2 - x1)
+            py = y1 + t * (y2 - y1)
+            for ox, oy, r_safe in obs_circles:
+                vx = px - ox
+                vy = py - oy
+                s = vx * ux + vy * uy
+                if abs(s) < r_safe:
+                    r_perp = math.sqrt(max(0.0, r_safe**2 - s**2))
+                    d_perp = vx * nx + vy * ny
+                    if abs(d_perp) < r_perp:
+                        sign = 1.0 if d_perp >= 0 else -1.0
+                        shift = r_perp - abs(d_perp)
+                        cand_x = px + sign * shift * nx
+                        cand_y = py + sign * shift * ny
+                        from shapely.geometry import Point as ShapelyPoint
+                        if field_poly and not field_poly.contains(ShapelyPoint(cand_x, cand_y)):
+                            cand_x = px - sign * shift * nx
+                            cand_y = py - sign * shift * ny
+                        px, py = cand_x, cand_y
+                        break
+            pts.append((px, py))
+        return pts
+
+    def _pts_to_poses(self, pts):
+        """Ubah list of (x, y) menjadi list of PoseStamped dengan orientasi yaw mulus."""
+        poses = []
+        n = len(pts)
+        if n == 0:
+            return poses
+
+        last_yaw = 0.0
+        for i in range(n):
+            if i < n - 1:
+                dx = pts[i + 1][0] - pts[i][0]
+                dy = pts[i + 1][1] - pts[i][1]
+                if math.hypot(dx, dy) > 1e-4:
+                    yaw = math.atan2(dy, dx)
+                    last_yaw = yaw
+                else:
+                    yaw = last_yaw
+            else:
+                yaw = last_yaw
+
+            p = PoseStamped()
+            p.header.frame_id = 'map'
+            p.header.stamp = self.get_clock().now().to_msg()
+            p.pose.position.x = float(pts[i][0])
+            p.pose.position.y = float(pts[i][1])
+            p.pose.orientation.z = math.sin(yaw / 2.0)
+            p.pose.orientation.w = math.cos(yaw / 2.0)
+            poses.append(p)
+        return poses
+
     # ══════════════════════════════════════════════════════════════════════════
     #  SHAPELY → f2c.Cells CONVERSION
     # ══════════════════════════════════════════════════════════════════════════
 
     def _shapely_to_f2c_cells(self, shapely_poly) -> f2c.Cells:
-        """Konversi ShapelyPolygon (dengan interior holes) ke f2c.Cells."""
+        """Konversi ShapelyPolygon ke f2c.Cells."""
         cells = f2c.Cells()
         if shapely_poly.is_empty:
             return cells
@@ -250,18 +338,16 @@ class CoverageServer(Node):
         for p in polys:
             if p.is_empty or p.area < 0.05:
                 continue
-            p = p.buffer(0)  # Pastikan geometri valid
+            p = p.buffer(0)
             if p.is_empty or p.area < 0.05:
                 continue
 
             c = f2c.Cell()
-            # Exterior ring (batas luar lahan)
             ext = f2c.LinearRing()
             for x, y in p.exterior.coords:
                 ext.addPoint(f2c.Point(float(x), float(y), 0.0))
             c.addRing(ext)
 
-            # Interior rings (lubang rintangan meja)
             for interior in p.interiors:
                 ir = f2c.LinearRing()
                 for x, y in interior.coords:
@@ -272,7 +358,7 @@ class CoverageServer(Node):
         return cells
 
     # ══════════════════════════════════════════════════════════════════════════
-    #  MAIN PIPELINE: Pure Fields2Cover
+    #  MAIN PIPELINE: Pure Fields2Cover + Obstacle Bypass
     # ══════════════════════════════════════════════════════════════════════════
 
     def _generate_coverage_path(self):
@@ -286,23 +372,22 @@ class CoverageServer(Node):
             swath_angle = self.get_parameter('swath_angle').get_parameter_value().double_value
             enable_perimeter = self.get_parameter('enable_perimeter_tour').get_parameter_value().bool_value
 
-            # ── 1. Poligon Lahan Shapely dikurangi Rintangan Meja ──
+            # ── 1. Poligon Lahan Shapely ──
             poly_pts = [(float(pt.x), float(pt.y)) for pt in self.current_field_polygon.points]
             field_poly = ShapelyPolygon(poly_pts).buffer(0)
-
-            obstacles = self._extract_obstacle_polygons(poly_pts)
-            for obs in obstacles:
-                field_poly = field_poly.difference(obs)
-
             if field_poly.is_empty:
-                return False, "Area lahan kosong setelah dikurangi rintangan."
+                return False, "Area lahan kosong."
 
-            # ── 2. Konversi ke f2c.Cells (Exterior + Interior Hole Rintangan) ──
+            obstacles, obs_circles = self._extract_obstacle_polygons(poly_pts)
+
+            # ── 2. Konversi ke f2c.Cells (Batas bersih lahan) ──
+            # Kita TIDAK membuat lubang polygon di tiang meja agar Fields2Cover menghasilkan
+            # sapuan swath murni, utuh, rapi, dan konsisten (kaki meja dihindari via smooth arc bypass).
             raw_cells = self._shapely_to_f2c_cells(field_poly)
             if raw_cells.size() == 0:
                 return False, "f2c.Cells kosong."
 
-            # ── 3. Boustrophedon Cellular Decomposition (Untuk Visualisasi & Analisis Sub-Sel) ──
+            # ── 3. Cellular Decomposition (Untuk Visualisasi & Analisis Sub-Sel) ──
             decomp = f2c.DECOMP_Boustrophedon()
             cells = decomp.decompose(raw_cells)
             self.get_logger().info(
@@ -315,62 +400,49 @@ class CoverageServer(Node):
             robot = f2c.Robot(robot_width, cov_width)
             robot.setMinTurningRadius(turning_radius)
 
-            dense_step = 0.05
-            perim_poses = []
+            dense_step = 0.04
+            perim_pts = []
             robot_pose = self._get_robot_pose_from_tf()
             rx = robot_pose[0] if robot_pose else poly_pts[0][0]
             ry = robot_pose[1] if robot_pose else poly_pts[0][1]
 
             hg = f2c.HG_Const_gen()
 
-            # ── 5. Fase 1: Perimeter / Headland Tour (Standar Robot Komersial) ──
-            # Mengitari tepi dinding luar ruangan dan mengitari rintangan meja
+            # ── 5. Fase 1: Perimeter Tour (Keliling Dinding Ruangan Bersih) ──
             if enable_perimeter:
                 try:
                     hl_swaths = hg.generateHeadlandSwaths(raw_cells, cov_width, 1)
                     if hl_swaths and len(hl_swaths) > 0 and hl_swaths[0].size() > 0:
-                        for ci in range(hl_swaths[0].size()):
-                            cell_i = hl_swaths[0].getGeometry(ci)
-                            # HANYA proses ring 0 (Batas luar ruangan / perimeter dinding).
-                            # ABAIKAN ring >= 1 (lubang kaki meja) agar TIDAK ADA jalur belah ketupat di sekeliling tiang!
-                            if cell_i.size() == 0:
-                                continue
+                        cell_i = hl_swaths[0].getGeometry(0)
+                        if cell_i.size() > 0:
                             ring = cell_i.getGeometry(0)
-                            if ring.size() < 3:
-                                continue
-                            raw_pts = [(ring.getGeometry(i).getX(), ring.getGeometry(i).getY()) for i in range(ring.size())]
-                            if math.hypot(raw_pts[0][0] - raw_pts[-1][0], raw_pts[0][1] - raw_pts[-1][1]) < 0.01:
-                                raw_pts = raw_pts[:-1]
+                            if ring.size() >= 3:
+                                raw_pts = [(ring.getGeometry(i).getX(), ring.getGeometry(i).getY()) for i in range(ring.size())]
+                                if math.hypot(raw_pts[0][0] - raw_pts[-1][0], raw_pts[0][1] - raw_pts[-1][1]) < 0.01:
+                                    raw_pts = raw_pts[:-1]
 
-                                # Urutkan titik loop perimeter dimulai dari titik terdekat dengan robot
                                 best_idx = min(range(len(raw_pts)), key=lambda i: math.hypot(raw_pts[i][0] - rx, raw_pts[i][1] - ry))
                                 ordered = raw_pts[best_idx:] + raw_pts[:best_idx]
                                 ordered.append(ordered[0])  # Tutup loop 360°
 
                                 for i in range(len(ordered) - 1):
-                                    x1, y1 = ordered[i]
-                                    x2, y2 = ordered[i+1]
-                                    d = math.hypot(x2 - x1, y2 - y1)
-                                    n = max(1, int(d / dense_step))
-                                    yaw = math.atan2(y2 - y1, x2 - x1)
-                                    for j in range(n):
-                                        t = j / float(n)
-                                        p = PoseStamped()
-                                        p.header.frame_id = 'map'
-                                        p.header.stamp = self.get_clock().now().to_msg()
-                                        p.pose.position.x = x1 + t * (x2 - x1)
-                                        p.pose.position.y = y1 + t * (y2 - y1)
-                                        p.pose.orientation.z = math.sin(yaw / 2.0)
-                                        p.pose.orientation.w = math.cos(yaw / 2.0)
-                                        perim_poses.append(p)
-                        self.get_logger().info(
-                            f"🛡️  [FASE 1 - PERIMETER] Tour keliling batas & rintangan siap: {len(perim_poses)} waypoint.")
+                                    seg_pts = self._bypass_segment(
+                                        ordered[i][0], ordered[i][1],
+                                        ordered[i+1][0], ordered[i+1][1],
+                                        obs_circles, field_poly, dense_step)
+                                    if perim_pts and seg_pts:
+                                        perim_pts.extend(seg_pts[1:])
+                                    else:
+                                        perim_pts.extend(seg_pts)
+                                self.get_logger().info(
+                                    f"🛡️  [FASE 1 - PERIMETER] Tour keliling batas siap: {len(perim_pts)} waypoint.")
                 except Exception as e:
                     self.get_logger().warn(f"⚠️ Gagal generate perimeter tour ({e}), fallback ke infill murni.")
-                    perim_poses = []
+                    perim_pts = []
 
-            # ── 6. Fase 2: Infill Sweeping di Area Tengah yang Bersih ──
-            # Menghitung inner_field yang sudah dikurangi headland (margin cov_width * 0.5 dari dinding & rintangan)
+            perim_poses = self._pts_to_poses(perim_pts)
+
+            # ── 6. Fase 2: Infill Sweeping Bersih, Rapi & Teratur (Serpentine/Boustrophedon) ──
             inner_field = None
             if enable_perimeter and len(perim_poses) > 0:
                 try:
@@ -394,11 +466,10 @@ class CoverageServer(Node):
                 except Exception:
                     c_sw = sg.generateSwaths(swath_angle, cov_width, target_cells.getGeometry(k))
                 for s_i in range(c_sw.size()):
-                    if c_sw[s_i].length() >= 0.20:  # Filter micro-swaths
+                    if c_sw[s_i].length() >= 0.20:
                         swaths.push_back(c_sw[s_i])
 
             if swaths.size() == 0:
-                # Fallback ke raw cells jika inner_field terlalu sempit
                 for k in range(raw_cells.size()):
                     try:
                         c_sw = sg.generateBestSwaths(obj_n, cov_width, raw_cells.getGeometry(k))
@@ -425,108 +496,64 @@ class CoverageServer(Node):
 
             sorted_sw = boustro.genSortedSwaths(swaths, best_v)
 
-            # Perencanaan Jalur Infill Bersih untuk Robot Differential Drive (Tanpa Omega Loop Traktor)
-            infill_poses = []
+            # Generate jalur infill teratur dengan smooth circular bypass jika berpapasan tiang meja
+            infill_pts = []
             for i in range(sorted_sw.size()):
                 s = sorted_sw[i]
                 if s.length() < 0.20:
                     continue
                 x1, y1 = s.startPoint().getX(), s.startPoint().getY()
                 x2, y2 = s.endPoint().getX(), s.endPoint().getY()
-                d = math.hypot(x2 - x1, y2 - y1)
-                n = max(1, int(d / dense_step))
-                yaw = math.atan2(y2 - y1, x2 - x1)
-                for j in range(n + 1):
-                    t = j / float(n)
-                    p = PoseStamped()
-                    p.header.frame_id = 'map'
-                    p.header.stamp = self.get_clock().now().to_msg()
-                    p.pose.position.x = x1 + t * (x2 - x1)
-                    p.pose.position.y = y1 + t * (y2 - y1)
-                    p.pose.orientation.z = math.sin(yaw / 2.0)
-                    p.pose.orientation.w = math.cos(yaw / 2.0)
-                    infill_poses.append(p)
 
-                # Sambungan lurus bersih ke baris berikutnya (U-turn langsung tanpa omega loops)
+                swath_seg = self._bypass_segment(x1, y1, x2, y2, obs_circles, field_poly, dense_step)
+                if infill_pts and swath_seg:
+                    infill_pts.extend(swath_seg[1:])
+                else:
+                    infill_pts.extend(swath_seg)
+
+                # Sambungan U-turn langsung ke baris berikutnya (Langkah ortogonal rapi tanpa garis diagonal)
                 if i < sorted_sw.size() - 1:
                     next_s = sorted_sw[i + 1]
                     nx, ny = next_s.startPoint().getX(), next_s.startPoint().getY()
-                    td = math.hypot(nx - x2, ny - y2)
-                    tn = max(1, int(td / dense_step))
-                    tyaw = math.atan2(ny - y2, nx - x2)
-                    for j in range(1, tn):
-                        t = j / float(tn)
-                        p = PoseStamped()
-                        p.header.frame_id = 'map'
-                        p.header.stamp = self.get_clock().now().to_msg()
-                        p.pose.position.x = x2 + t * (nx - x2)
-                        p.pose.position.y = y2 + t * (ny - y2)
-                        p.pose.orientation.z = math.sin(tyaw / 2.0)
-                        p.pose.orientation.w = math.cos(tyaw / 2.0)
-                        infill_poses.append(p)
+                    turn_seg = self._bypass_segment(
+                        infill_pts[-1][0], infill_pts[-1][1],
+                        nx, ny,
+                        obs_circles, field_poly, dense_step)
+                    if len(turn_seg) > 1:
+                        infill_pts.extend(turn_seg[1:])
 
-            infill_ros = Path()
-            infill_ros.header.frame_id = 'map'
-            infill_ros.header.stamp = self.get_clock().now().to_msg()
-            infill_ros.poses = infill_poses
-
+            infill_poses = self._pts_to_poses(infill_pts)
             self.get_logger().info(
-                f"🚜 [FASE 2 - INFILL] Swaths Paralel Bersih: {sorted_sw.size()} baris terurut, {len(infill_poses)} waypoint.")
+                f"🚜 [FASE 2 - INFILL] Swaths Paralel Rapi: {sorted_sw.size()} baris terurut rapi, {len(infill_poses)} waypoint.")
 
-            # ── 7. Sambungkan Fase 1 (Perimeter) ke Fase 2 (Infill) Secara Mulus ──
-            trans_poses = []
-            if perim_poses and infill_ros.poses:
-                p_last = perim_poses[-1].pose.position
-                p_first = infill_ros.poses[0].pose.position
-                d_trans = math.hypot(p_first.x - p_last.x, p_first.y - p_last.y)
-                n_trans = max(1, int(d_trans / dense_step))
-                yaw_trans = math.atan2(p_first.y - p_last.y, p_first.x - p_last.x)
-                for j in range(n_trans):
-                    t = j / float(n_trans)
-                    p = PoseStamped()
-                    p.header.frame_id = 'map'
-                    p.header.stamp = self.get_clock().now().to_msg()
-                    p.pose.position.x = p_last.x + t * (p_first.x - p_last.x)
-                    p.pose.position.y = p_last.y + t * (p_first.y - p_last.y)
-                    p.pose.orientation.z = math.sin(yaw_trans / 2.0)
-                    p.pose.orientation.w = math.cos(yaw_trans / 2.0)
-                    trans_poses.append(p)
-
-            combined_poses = perim_poses + trans_poses + infill_ros.poses
+            # ── 7. Filter obstacle costmap per fase agar index dan perim_count akurat ──
+            perim_path = Path()
+            perim_path.header.frame_id = 'map'
+            perim_path.header.stamp = self.get_clock().now().to_msg()
+            perim_path.poses = perim_poses
+            perim_path = self._filter_obstacle_waypoints(perim_path)
+            perim_poses = perim_path.poses
             perim_count = len(perim_poses)
+
+            infill_path = Path()
+            infill_path.header.frame_id = 'map'
+            infill_path.header.stamp = self.get_clock().now().to_msg()
+            infill_path.poses = infill_poses
+            infill_path = self._filter_obstacle_waypoints(infill_path)
+            infill_poses = infill_path.poses
+
+            combined_poses = perim_poses + infill_poses
 
             ros_path = Path()
             ros_path.header.frame_id = 'map'
             ros_path.header.stamp = self.get_clock().now().to_msg()
             ros_path.poses = combined_poses
 
-            # ── 8. Filter waypoint dalam polygon rintangan (kaki meja + clearance) ──
-            if obstacles:
-                valid_poses = []
-                num_dropped = 0
-                for p in ros_path.poses:
-                    from shapely.geometry import Point as ShapelyPoint
-                    pt = ShapelyPoint(p.pose.position.x, p.pose.position.y)
-                    inside = False
-                    for obs in obstacles:
-                        if obs.contains(pt):
-                            inside = True
-                            break
-                    if inside:
-                        num_dropped += 1
-                    else:
-                        valid_poses.append(p)
-                if num_dropped > 0:
-                    self.get_logger().info(
-                        f"🛡️  Filter polygon: {num_dropped} waypoint di dalam obstacle zone dihapus "
-                        f"({len(valid_poses)} tersisa).")
-                    ros_path.poses = valid_poses
-
-            # ── 9. Filter waypoint dalam obstacle costmap (jika ada) ──
+            # ── 8. Filter waypoint dalam obstacle costmap (jika ada) ──
             ros_path = self._filter_obstacle_waypoints(ros_path)
 
-            # ── 10. Visualisasi Markers & Publish ──
-            path_markers = self.vis.create_path_markers(ros_path, perim_count)
+            # ── 9. Visualisasi Markers & Publish ──
+            path_markers = self.vis.create_path_markers(ros_path, perim_count, obs_circles)
             cell_markers = self.vis.create_cells_markers(cells)
             all_markers = MarkerArray()
             all_markers.markers.extend(path_markers.markers)
@@ -534,11 +561,14 @@ class CoverageServer(Node):
 
             self.last_path = ros_path
             self.last_markers = all_markers
+            self._last_perim_count = perim_count
             self.path_pub.publish(ros_path)
             self.marker_pub.publish(all_markers)
+            self.vis_marker_pub.publish(all_markers)
+            self.perim_count_pub.publish(Int32(data=int(perim_count)))
 
             return True, (f"Commercial Coverage Path Siap: {len(perim_poses)} waypoint Perimeter (Fase 1) "
-                          f"+ {len(infill_ros.poses)} waypoint Infill (Fase 2) | Total: {len(ros_path.poses)} poses")
+                          f"+ {len(infill_poses)} waypoint Infill (Fase 2) | Total: {len(ros_path.poses)} poses")
 
         except Exception as e:
             import traceback
