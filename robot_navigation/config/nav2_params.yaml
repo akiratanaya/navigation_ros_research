@@ -137,13 +137,20 @@ controller_server:
     - FollowPath
     goal_checker_plugins:
     - general_goal_checker
+    - coverage_goal_checker
     progress_checker_plugins:
     - progress_checker
 
     general_goal_checker:
       plugin: nav2_controller::SimpleGoalChecker
       stateful: false
-      xy_goal_tolerance: 0.20
+      xy_goal_tolerance: 0.08
+      yaw_goal_tolerance: 3.14
+
+    coverage_goal_checker:
+      plugin: nav2_controller::SimpleGoalChecker
+      stateful: false
+      xy_goal_tolerance: 0.08
       yaw_goal_tolerance: 3.14
 
     progress_checker:
@@ -153,28 +160,28 @@ controller_server:
 
     FollowPath:
       plugin: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController
-      desired_linear_vel: 0.35
+      desired_linear_vel: 0.30
       lookahead_dist: 0.22
-      min_lookahead_dist: 0.15
-      max_lookahead_dist: 0.35
-      lookahead_time: 1.0
+      min_lookahead_dist: 0.18
+      max_lookahead_dist: 0.28
+      lookahead_time: 0.6
       use_rotate_to_heading: true
-      rotate_to_heading_min_angle: 0.45
-      rotate_to_heading_angular_vel: 1.50
-      max_angular_accel: 3.2
+      rotate_to_heading_min_angle: 0.785
+      rotate_to_heading_angular_vel: 0.85
+      max_angular_accel: 2.5
       transform_tolerance: 0.2
-      use_velocity_scaled_lookahead_dist: false
-      min_approach_linear_velocity: 0.10
-      approach_velocity_scaling_dist: 0.4
+      use_velocity_scaled_lookahead_dist: true
+      min_approach_linear_velocity: 0.08
+      approach_velocity_scaling_dist: 0.20
       use_collision_detection: false
       use_regulated_linear_velocity_scaling: true
       use_fixed_curvature_lookahead: false
       curvature_feedback_gain: 1.0
       regulated_linear_scaling_min_radius: 0.15
-      regulated_linear_scaling_min_speed: 0.20
+      regulated_linear_scaling_min_speed: 0.08
       use_cost_regulated_linear_velocity_scaling: false
       cost_scaling_dist: 0.25
-      cost_scaling_gain: 1.5
+      cost_scaling_gain: 1.0
       allow_reversing: false
       max_robot_pose_search_dist: 0.8
       use_interpolation: true
