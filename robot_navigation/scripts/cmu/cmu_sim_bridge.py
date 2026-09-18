@@ -136,8 +136,14 @@ class CmuSimBridge(Node):
         self.state_est_pub.publish(state_msg)
 
     def clicked_point_callback(self, msg: PointStamped):
-        self.get_logger().info(f"🎯 Waypoint dari /clicked_point diterima: ({msg.point.x:.2f}, {msg.point.y:.2f})")
-        self.waypoint_pub.publish(msg)
+        pt = PointStamped()
+        pt.header = msg.header
+        pt.header.frame_id = self.world_frame
+        pt.point.x = msg.point.x
+        pt.point.y = msg.point.y
+        pt.point.z = 0.0  # Lock to ground level
+        self.get_logger().info(f"🎯 Waypoint dari /clicked_point diterima: ({pt.point.x:.2f}, {pt.point.y:.2f}, z=0.0)")
+        self.waypoint_pub.publish(pt)
 
     def goal_pose_callback(self, msg: PoseStamped):
         pt = PointStamped()
@@ -145,8 +151,8 @@ class CmuSimBridge(Node):
         pt.header.frame_id = self.world_frame
         pt.point.x = msg.pose.position.x
         pt.point.y = msg.pose.position.y
-        pt.point.z = msg.pose.position.z
-        self.get_logger().info(f"🎯 Waypoint dari /goal_pose diterima: ({pt.point.x:.2f}, {pt.point.y:.2f})")
+        pt.point.z = 0.0  # Lock to ground level
+        self.get_logger().info(f"🎯 Waypoint dari /goal_pose diterima: ({pt.point.x:.2f}, {pt.point.y:.2f}, z=0.0)")
         self.waypoint_pub.publish(pt)
 
     def points_callback(self, msg: PointCloud2):

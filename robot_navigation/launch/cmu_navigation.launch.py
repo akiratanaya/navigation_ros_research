@@ -46,10 +46,43 @@ def generate_launch_description():
     )
 
     # 2. Terrain Analysis (Menganalisis tanah & rintangan 3D)
-    terrain_analysis_launch = IncludeLaunchDescription(
-        FrontendLaunchDescriptionSource(os.path.join(
-            pkg_terrain_analysis, 'launch', 'terrain_analysis.launch')
-        )
+    terrain_analysis_node = Node(
+        package='terrain_analysis',
+        executable='terrainAnalysis',
+        name='terrainAnalysis',
+        output='screen',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'scanVoxelSize': 0.05,
+            'decayTime': 1.0,
+            'noDecayDis': 1.75,
+            'clearingDis': 8.0,
+            'useSorting': True,
+            'quantileZ': 0.25,
+            'considerDrop': False,
+            'limitGroundLift': False,
+            'maxGroundLift': 0.15,
+            'clearDyObs': True,
+            'sensorPitch': 0.0,              # LiDAR horizontal rata (bukan miring 20 derajat)
+            'minDyObsDis': 0.14,
+            'absDyObsRelZThre': 0.2,
+            'minDyObsVFOV': -10.0,
+            'maxDyObsVFOV': 55.0,
+            'minDyObsPointNum': 1,
+            'minOutOfFovPointNum': 10,
+            'obstacleHeightThre': 0.1,
+            'nearObstacle': False,            # Nonaktifkan agar lantai di sekitar robot tidak dicap rintangan
+            'nearObstacleDis': 0.0,
+            'nearObstacleRelZThre': -0.3,
+            'negObstacle': -1,
+            'negObstacleDis': 10.0,
+            'negObstacleRelZThre': -0.2,
+            'noDataObstacle': False,
+            'vehicleHeight': 1.5,
+            'minRelZ': -1.5,
+            'maxRelZ': 0.3,
+            'disRatioZ': 0.2,
+        }]
     )
 
     # 3. Terrain Analysis Ext (Jangkauan terrain luas)
@@ -90,7 +123,7 @@ def generate_launch_description():
         declare_max_speed,
         declare_autonomy_speed,
         cmu_sim_bridge_node,
-        terrain_analysis_launch,
+        terrain_analysis_node,
         terrain_analysis_ext_launch,
         sensor_scan_gen_launch,
         local_planner_launch,
