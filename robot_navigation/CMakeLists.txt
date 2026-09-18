@@ -12,9 +12,9 @@ find_package(rclpy REQUIRED)
 # Install Python modules
 ament_python_install_package(${PROJECT_NAME})
 
-# Install launch, config, scripts directories
+# Install launch, config, rviz directories
 install(
-  DIRECTORY launch config
+  DIRECTORY launch config rviz
   DESTINATION share/${PROJECT_NAME}
 )
 
