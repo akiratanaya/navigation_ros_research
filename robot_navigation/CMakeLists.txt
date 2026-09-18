@@ -18,11 +18,14 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
-# Install Python scripts
+# Install Python scripts (Nav2 and CMU)
 install(
   PROGRAMS
-    scripts/auto_explorer.py
-    scripts/initial_pose_pub.py
+    # Nav2 scripts
+    scripts/nav2/auto_explorer.py
+    scripts/nav2/initial_pose_pub.py
+    # CMU Autonomy scripts
+    scripts/cmu/cmu_sim_bridge.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
