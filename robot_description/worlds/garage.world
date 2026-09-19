@@ -30,7 +30,9 @@
     </plugin>
 
     <scene>
-      <shadows>false</shadows>
+      <ambient>0.65 0.65 0.65 1.0</ambient>
+      <background>0.7 0.8 0.9 1.0</background>
+      <shadows>true</shadows>
       <grid>false</grid>
     </scene>
 
