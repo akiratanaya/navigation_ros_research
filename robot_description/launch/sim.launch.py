@@ -50,9 +50,14 @@ def generate_launch_description():
         default_value='true',
         description='Buka RViz2 secara otomatis jika true'
     )
+    rviz_config_arg = DeclareLaunchArgument(
+        'rviz_config',
+        default_value=os.path.join(pkg_path, 'rviz', 'sim.rviz'),
+        description='Path ke file konfigurasi RViz2 (default: sim.rviz)'
+    )
 
     world_path = PathJoinSubstitution([pkg_path, 'worlds', LaunchConfiguration('world')])
-    rviz_config_path = os.path.join(pkg_path, 'rviz', 'sim.rviz')
+    rviz_config_path = LaunchConfiguration('rviz_config')
 
     # 1. Gazebo Sim (Harmonic) - start pertama
     gz_sim = IncludeLaunchDescription(
@@ -198,6 +203,7 @@ def generate_launch_description():
         z_arg,
         lidar_mode_arg,
         rviz_arg,
+        rviz_config_arg,
         gz_sim,            # 1. Gazebo start
         base_bridge_node,  # 2. Bridge dasar (Clock, Odom, CmdVel, TF, Camera, IMU)
         bridge_2d,         # 3a. Bridge 2D: /scan (hanya aktif jika lidar_mode:=2d)
