@@ -1,0 +1,15 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ROS build artifacts (if any inside src)
+build/
+install/
+log/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*~
