@@ -63,10 +63,10 @@
             <origin xyz="0 0 ${lidar_height/2}" rpy="0 0 0" />
         </joint>
 
-        <!-- ═══ GAZEBO: Preserve joint (tidak di-collapse) ══════════════════ -->
-        <gazebo reference="lidar_3d_joint">
+        <!-- ═══ GAZEBO: Fixed joint handled statically by robot_state_publisher ═══ -->
+        <!-- <gazebo reference="lidar_3d_joint">
             <preserveFixedJoint>true</preserveFixedJoint>
-        </gazebo>
+        </gazebo> -->
 
         <!-- ═══ GAZEBO: Material ═════════════════════════════════════════════ -->
         <gazebo reference="lidar_3d_link">
