@@ -14,6 +14,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name, 'rviz'), glob('rviz/*.rviz')),
+        (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -31,6 +32,7 @@ setup(
             'footprint_trail_visualizer = robot_coverage.footprint_trail_visualizer:main',
             'cmu_sim_bridge = robot_coverage.cmu_sim_bridge:main',
             'cmu_coverage_navigator = robot_coverage.cmu_coverage_navigator:main',
+            'send_custom_polygon = robot_coverage.send_custom_polygon:main',
         ],
     },
 )

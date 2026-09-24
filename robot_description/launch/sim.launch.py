@@ -37,12 +37,13 @@ def generate_launch_description():
         default_value='true',
         description='Gunakan simulasi clock jika true'
     )
-    x_arg = DeclareLaunchArgument('x', default_value='-2.0', description='Posisi spawn robot X')
-    y_arg = DeclareLaunchArgument('y', default_value='1.0', description='Posisi spawn robot Y')
+    x_arg = DeclareLaunchArgument('x', default_value='-4.7', description='Posisi spawn robot X')
+    y_arg = DeclareLaunchArgument('y', default_value='-4.7', description='Posisi spawn robot Y')
     z_arg = DeclareLaunchArgument('z', default_value='0.05', description='Posisi spawn robot Z')
+    yaw_arg = DeclareLaunchArgument('yaw', default_value='0.7854', description='Rotasi yaw robot saat spawn (rad)')
     lidar_mode_arg = DeclareLaunchArgument(
         'lidar_mode',
-        default_value='2d',
+        default_value='3d',
         description='Mode LiDAR: "2d" (LaserScan flat) atau "3d" (PointCloud2 VLP-16)'
     )
     rviz_arg = DeclareLaunchArgument(
@@ -50,9 +51,20 @@ def generate_launch_description():
         default_value='true',
         description='Buka RViz2 secara otomatis jika true'
     )
+    rviz_config_arg = DeclareLaunchArgument(
+        'rviz_config',
+        default_value=os.path.join(pkg_path, 'rviz', 'sim.rviz'),
+        description='Path ke file konfigurasi RViz2 (default: sim.rviz)'
+    )
+
+    bridge_tf_arg = DeclareLaunchArgument(
+        'bridge_tf',
+        default_value='true',
+        description='Bridge /tf dari Gazebo ke ROS 2 jika true (matikan jika menggunakan SLAM seperti LIO-SAM)'
+    )
 
     world_path = PathJoinSubstitution([pkg_path, 'worlds', LaunchConfiguration('world')])
-    rviz_config_path = os.path.join(pkg_path, 'rviz', 'sim.rviz')
+    rviz_config_path = LaunchConfiguration('rviz_config')
 
     # 1. Gazebo Sim (Harmonic) - start pertama
     gz_sim = IncludeLaunchDescription(
@@ -60,7 +72,7 @@ def generate_launch_description():
         launch_arguments={'gz_args': ['-r ', world_path]}.items()
     )
 
-    # 2. Bridge Dasar (selalu aktif: Clock, CmdVel, Odom, JointStates, TF, IMU, Camera)
+    # 2. Bridge Dasar (selalu aktif: Clock, CmdVel, Odom, JointStates, IMU, Camera)
     base_bridge_node = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
@@ -69,7 +81,6 @@ def generate_launch_description():
             '/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
             '/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
             '/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model',
-            '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V',
             '/imu/data@sensor_msgs/msg/Imu[gz.msgs.IMU',
             '/camera/image@sensor_msgs/msg/Image[gz.msgs.Image',
             '/camera/depth_image@sensor_msgs/msg/Image[gz.msgs.Image',
@@ -77,6 +88,18 @@ def generate_launch_description():
             '/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo'
         ],
         parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+        output='screen'
+    )
+
+    # Bridge TF Gazebo (Opsional, dinonaktifkan jika SLAM yang mempublikasikan TF odom)
+    tf_bridge_node = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        arguments=[
+            '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V',
+        ],
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+        condition=IfCondition(LaunchConfiguration('bridge_tf')),
         output='screen'
     )
 
@@ -156,7 +179,7 @@ def generate_launch_description():
     ])
 
     spawn_entity = TimerAction(
-        period=5.5,
+        period=2.5,
         actions=[
             Node(
                 package='ros_gz_sim',
@@ -166,7 +189,8 @@ def generate_launch_description():
                     '-name', 'autonav_bot',
                     '-x', LaunchConfiguration('x'),
                     '-y', LaunchConfiguration('y'),
-                    '-z', LaunchConfiguration('z')
+                    '-z', LaunchConfiguration('z'),
+                    '-Y', LaunchConfiguration('yaw')
                 ],
                 output='screen'
             )
@@ -175,7 +199,7 @@ def generate_launch_description():
 
     # 5. RViz2 Node — otomatis terbuka bersama simulasi
     rviz_node = TimerAction(
-        period=6.0,
+        period=4.0,
         actions=[
             Node(
                 package='rviz2',
@@ -196,10 +220,14 @@ def generate_launch_description():
         x_arg,
         y_arg,
         z_arg,
+        yaw_arg,
         lidar_mode_arg,
+        bridge_tf_arg,
         rviz_arg,
+        rviz_config_arg,
         gz_sim,            # 1. Gazebo start
-        base_bridge_node,  # 2. Bridge dasar (Clock, Odom, CmdVel, TF, Camera, IMU)
+        base_bridge_node,  # 2. Bridge dasar (Clock, Odom, CmdVel, Camera, IMU)
+        tf_bridge_node,    # 2b. Bridge TF Gazebo (opsional)
         bridge_2d,         # 3a. Bridge 2D: /scan (hanya aktif jika lidar_mode:=2d)
         bridge_3d,         # 3b. Bridge 3D: /points (hanya aktif jika lidar_mode:=3d)
         p2l_node,          # 3c. Konversi /points -> /scan (hanya aktif jika lidar_mode:=3d)

@@ -12,17 +12,22 @@ find_package(rclpy REQUIRED)
 # Install Python modules
 ament_python_install_package(${PROJECT_NAME})
 
-# Install launch, config, scripts directories
+# Install launch, config, rviz directories
 install(
-  DIRECTORY launch config
+  DIRECTORY launch config rviz
   DESTINATION share/${PROJECT_NAME}
 )
 
-# Install Python scripts
+# Install Python scripts (Nav2 and CMU)
 install(
   PROGRAMS
-    scripts/auto_explorer.py
-    scripts/initial_pose_pub.py
+    # Nav2 scripts
+    scripts/nav2/auto_explorer.py
+    scripts/nav2/initial_pose_pub.py
+    # CMU Autonomy scripts
+    scripts/cmu/cmu_sim_bridge.py
+    scripts/cmu/lio_sam_cmu_bridge.py
+    scripts/cmu/cmu_coverage_bridge.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

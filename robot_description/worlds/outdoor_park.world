@@ -7,6 +7,7 @@
       <real_time_factor>1.0</real_time_factor>
     </physics>
 
+    <!-- Essential Gazebo Harmonic Core Plugins -->
     <plugin
       filename="gz-sim-physics-system"
       name="gz::sim::systems::Physics">
@@ -29,16 +30,17 @@
       name="gz::sim::systems::Imu">
     </plugin>
 
+    <!-- Natural Outdoor Lighting and Sky -->
     <scene>
-      <ambient>0.65 0.65 0.65 1.0</ambient>
-      <background>0.7 0.8 0.9 1.0</background>
+      <ambient>0.70 0.70 0.70 1.0</ambient>
+      <background>0.65 0.80 0.95 1.0</background>
       <shadows>true</shadows>
       <grid>false</grid>
     </scene>
 
     <gui fullscreen='0'>
       <camera name='user_camera'>
-        <pose>0.0 -5.0 12.0 0 1.1 1.57</pose>
+        <pose>-10.0 -10.0 14.0 0 0.75 0.785</pose>
         <view_controller>orbit</view_controller>
         <projection_type>perspective</projection_type>
       </camera>
@@ -48,27 +50,27 @@
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Sun</uri>
     </include>
 
-    <!-- Base ground safety plane underneath garage -->
-    <model name="ground_plane">
+    <!-- Deep Safety Ground Plane Underneath Park Terrain -->
+    <model name="safety_ground_plane">
       <static>true</static>
-      <pose>0 0 -0.2 0 0 0</pose>
+      <pose>0 0 -10.0 0 0 0</pose>
       <link name="link">
         <collision name="collision">
           <geometry>
             <plane>
               <normal>0 0 1</normal>
-              <size>200 200</size>
+              <size>300 300</size>
             </plane>
           </geometry>
         </collision>
       </link>
     </model>
 
-    <!-- CMU Multi-Story Parking Garage Benchmark Environment -->
-    <model name="garage">
+    <!-- Realistic 3D Outdoor Park with Rolling Hills, Trees, Boulders & Pavilion -->
+    <model name="outdoor_park">
       <static>true</static>
       <include>
-        <uri>model://garage</uri>
+        <uri>model://outdoor_park</uri>
       </include>
     </model>
 

@@ -1,0 +1,12 @@
+# Contoh Poligon Lahan Bentuk L (L-Shape Field)
+# Koordinat (X, Y) dalam meter pada frame 'map' di outdoor_park.world
+# Titik diurutkan berurutan melingkari batas luar lahan (searah atau berlawanan jarum jam)
+name: "meadow_l_shape"
+frame_id: "map"
+points:
+  - [-6.0, -4.0]   # Sudut kiri bawah
+  - [ 4.0, -4.0]   # Sudut kanan bawah
+  - [ 4.0,  0.0]   # Sudut kanan tengah
+  - [-1.0,  0.0]   # Sudut siku interior L
+  - [-1.0,  4.5]   # Sudut atas tengah
+  - [-6.0,  4.5]   # Sudut kiri atas

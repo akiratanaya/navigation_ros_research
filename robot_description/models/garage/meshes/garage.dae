@@ -81,10 +81,10 @@
         <technique sid="common">
           <lambert>
             <emission>
-              <color sid="emission">0.5 0.5 0.5 1</color>
+              <color sid="emission">0.05 0.05 0.05 1</color>
             </emission>
             <diffuse>
-              <color sid="diffuse">0.8343708 0.8321282 0.4021345 1</color>
+              <color sid="diffuse">0.62 0.64 0.66 1</color>
             </diffuse>
             <reflectivity>
               <float sid="specular">0.5</float>
@@ -108,7 +108,7 @@
         <technique sid="common">
           <lambert>
             <emission>
-              <color sid="emission">0.754827 0.754827 0.754827 1</color>
+              <color sid="emission">0.05 0.05 0.05 1</color>
             </emission>
             <diffuse>
               <texture texture="imgonline-com-ua-tile-turvdQ7ZY0r_jpg-sampler" texcoord="UVMap"/>
@@ -122,23 +122,23 @@
     </effect>
     <effect id="Material_004-effect">
       <profile_COMMON>
-        <newparam sid="imgonline-com-ua-tile-RySXiqZBriXUB4J_jpg-surface">
+        <newparam sid="imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg-surface">
           <surface type="2D">
-            <init_from>imgonline-com-ua-tile-RySXiqZBriXUB4J_jpg</init_from>
+            <init_from>imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg</init_from>
           </surface>
         </newparam>
-        <newparam sid="imgonline-com-ua-tile-RySXiqZBriXUB4J_jpg-sampler">
+        <newparam sid="imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg-sampler">
           <sampler2D>
-            <source>imgonline-com-ua-tile-RySXiqZBriXUB4J_jpg-surface</source>
+            <source>imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg-surface</source>
           </sampler2D>
         </newparam>
         <technique sid="common">
           <lambert>
             <emission>
-              <color sid="emission">0.3075857 0.3075857 0.3075857 1</color>
+              <color sid="emission">0.05 0.05 0.05 1</color>
             </emission>
             <diffuse>
-              <texture texture="imgonline-com-ua-tile-RySXiqZBriXUB4J_jpg-sampler" texcoord="UVMap"/>
+              <texture texture="imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg-sampler" texcoord="UVMap"/>
             </diffuse>
             <index_of_refraction>
               <float sid="ior">1.45</float>
@@ -149,23 +149,23 @@
     </effect>
     <effect id="Material_005-effect">
       <profile_COMMON>
-        <newparam sid="imgonline-com-ua-tile-RySXiqZBriXUB4J_jpg-surface">
+        <newparam sid="imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg-surface">
           <surface type="2D">
-            <init_from>imgonline-com-ua-tile-RySXiqZBriXUB4J_jpg</init_from>
+            <init_from>imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg</init_from>
           </surface>
         </newparam>
-        <newparam sid="imgonline-com-ua-tile-RySXiqZBriXUB4J_jpg-sampler">
+        <newparam sid="imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg-sampler">
           <sampler2D>
-            <source>imgonline-com-ua-tile-RySXiqZBriXUB4J_jpg-surface</source>
+            <source>imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg-surface</source>
           </sampler2D>
         </newparam>
         <technique sid="common">
           <lambert>
             <emission>
-              <color sid="emission">0.3030585 0.3030585 0.3030585 1</color>
+              <color sid="emission">0.05 0.05 0.05 1</color>
             </emission>
             <diffuse>
-              <texture texture="imgonline-com-ua-tile-RySXiqZBriXUB4J_jpg-sampler" texcoord="UVMap"/>
+              <texture texture="imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg-sampler" texcoord="UVMap"/>
             </diffuse>
             <index_of_refraction>
               <float sid="ior">1.45</float>
@@ -189,7 +189,7 @@
         <technique sid="common">
           <lambert>
             <emission>
-              <color sid="emission">0.5650231 0.5650231 0.5650231 1</color>
+              <color sid="emission">0.05 0.05 0.05 1</color>
             </emission>
             <diffuse>
               <texture texture="blue-concrete-texture-3_jpg-sampler" texcoord="UVMap"/>
@@ -216,7 +216,7 @@
         <technique sid="common">
           <lambert>
             <emission>
-              <color sid="emission">0.5 0.5 0.5 1</color>
+              <color sid="emission">0.05 0.05 0.05 1</color>
             </emission>
             <diffuse>
               <texture texture="imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg-sampler" texcoord="UVMap"/>
@@ -233,7 +233,7 @@
     <image id="blue-concrete-texture-3_jpg" name="blue-concrete-texture-3_jpg">
       <init_from>blue-concrete-texture-3.jpg</init_from>
     </image>
-    <image id="imgonline-com-ua-tile-RySXiqZBriXUB4J_jpg" name="imgonline-com-ua-tile-RySXiqZBriXUB4J_jpg">
+    <image id="imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg" name="imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg">
       <init_from>imgonline-com-ua-tile-RySXiqZBriXUB4J.jpg</init_from>
     </image>
     <image id="imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg" name="imgonline-com-ua-tile-pLFAF53NCY1Spr_jpg">
