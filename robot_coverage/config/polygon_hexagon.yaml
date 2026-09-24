@@ -1,0 +1,11 @@
+# Contoh Poligon Lahan Segi-Enam (Hexagonal Field)
+# Koordinat (X, Y) dalam meter pada frame 'map' di outdoor_park.world
+name: "meadow_hexagon"
+frame_id: "map"
+points:
+  - [-4.0,  0.0]   # Sudut barat
+  - [-2.0,  3.5]   # Sudut barat laut
+  - [ 2.0,  3.5]   # Sudut timur laut
+  - [ 4.0,  0.0]   # Sudut timur
+  - [ 2.0, -3.5]   # Sudut timur selatan
+  - [-2.0, -3.5]   # Sudut barat selatan

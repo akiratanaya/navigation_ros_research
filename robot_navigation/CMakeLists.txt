@@ -27,6 +27,7 @@ install(
     # CMU Autonomy scripts
     scripts/cmu/cmu_sim_bridge.py
     scripts/cmu/lio_sam_cmu_bridge.py
+    scripts/cmu/cmu_coverage_bridge.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

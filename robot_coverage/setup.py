@@ -14,6 +14,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name, 'rviz'), glob('rviz/*.rviz')),
+        (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -29,6 +30,7 @@ setup(
             'field_boundary_collector = robot_coverage.field_boundary_collector:main',
             'coverage_navigator = robot_coverage.coverage_navigator:main',
             'footprint_trail_visualizer = robot_coverage.footprint_trail_visualizer:main',
+            'send_custom_polygon = robot_coverage.send_custom_polygon:main',
         ],
     },
 )

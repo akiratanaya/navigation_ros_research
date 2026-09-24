@@ -145,11 +145,12 @@ class FootprintTrailVisualizer(Node):
                 timeout=rclpy.duration.Duration(seconds=0.1))
             rx = t.transform.translation.x
             ry = t.transform.translation.y
+            rz = t.transform.translation.z
             q = t.transform.rotation
             siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
             cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
             yaw = math.atan2(siny_cosp, cosy_cosp)
-            return (rx, ry, yaw)
+            return (rx, ry, rz, yaw)
         except Exception:
             return None
 
@@ -158,7 +159,7 @@ class FootprintTrailVisualizer(Node):
         if pose is None:
             return
 
-        rx, ry, yaw = pose
+        rx, ry, rz, yaw = pose
         half_w = self.tool_width / 2.0
 
         # Hitung dua titik sayap (kiri & kanan) dari tool/footprint robot saat ini
@@ -168,26 +169,26 @@ class FootprintTrailVisualizer(Node):
         right_y = ry - half_w * math.cos(yaw)
 
         if self._last_pose is None:
-            self._last_pose = (rx, ry, yaw, left_x, left_y, right_x, right_y)
+            self._last_pose = (rx, ry, rz, yaw, left_x, left_y, right_x, right_y)
             return
 
-        prev_rx, prev_ry, prev_yaw, p_left_x, p_left_y, p_right_x, p_right_y = self._last_pose
+        prev_rx, prev_ry, prev_rz, prev_yaw, p_left_x, p_left_y, p_right_x, p_right_y = self._last_pose
         dist_moved = math.hypot(rx - prev_rx, ry - prev_ry)
         yaw_diff = abs(yaw - prev_yaw)
 
         # Hanya tambahkan segmen jejak jika robot bergerak atau berputar cukup
         if dist_moved >= self.update_dist or yaw_diff >= 0.08:
-            def to_pt(x, y):
+            def to_pt(x, y, z):
                 p = Point()
                 p.x = float(x)
                 p.y = float(y)
-                p.z = 0.015  # Tepat di atas permukaan lantai
+                p.z = float(z + 0.02)  # Sedikit di atas permukaan tanah/medan 3D
                 return p
 
-            p1 = to_pt(p_left_x, p_left_y)
-            p2 = to_pt(p_right_x, p_right_y)
-            p3 = to_pt(left_x, left_y)
-            p4 = to_pt(right_x, right_y)
+            p1 = to_pt(p_left_x, p_left_y, prev_rz)
+            p2 = to_pt(p_right_x, p_right_y, prev_rz)
+            p3 = to_pt(left_x, left_y, rz)
+            p4 = to_pt(right_x, right_y, rz)
 
             # Segitiga 1: P1 -> P2 -> P3
             self._triangles.extend([p1, p2, p3])
@@ -208,7 +209,7 @@ class FootprintTrailVisualizer(Node):
                 ], dtype=np.int32)
                 cv2.fillPoly(self._covered_grid, [quad_pixels], 255)
 
-            self._last_pose = (rx, ry, yaw, left_x, left_y, right_x, right_y)
+            self._last_pose = (rx, ry, rz, yaw, left_x, left_y, right_x, right_y)
             self._publish_visuals()
 
     def _publish_visuals(self):
