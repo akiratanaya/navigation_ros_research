@@ -19,7 +19,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import FrontendLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+from launch_ros.actions import Node, SetParameter
 
 
 def generate_launch_description():
@@ -33,8 +33,8 @@ def generate_launch_description():
     autonomy_speed = LaunchConfiguration('autonomy_speed')
 
     declare_use_sim_time = DeclareLaunchArgument('use_sim_time', default_value='true')
-    declare_max_speed = DeclareLaunchArgument('max_speed', default_value='0.6')
-    declare_autonomy_speed = DeclareLaunchArgument('autonomy_speed', default_value='0.6')
+    declare_max_speed = DeclareLaunchArgument('max_speed', default_value='0.45')
+    declare_autonomy_speed = DeclareLaunchArgument('autonomy_speed', default_value='0.35')
 
     # 1. CMU Simulation Bridge (Penghubung Gazebo ke CMU)
     cmu_sim_bridge_node = Node(
@@ -70,7 +70,7 @@ def generate_launch_description():
             'maxDyObsVFOV': 55.0,
             'minDyObsPointNum': 1,
             'minOutOfFovPointNum': 10,
-            'obstacleHeightThre': 0.1,
+            'obstacleHeightThre': 0.09,
             'nearObstacle': False,            # Nonaktifkan agar lantai di sekitar robot tidak dicap rintangan
             'nearObstacleDis': 0.0,
             'nearObstacleRelZThre': -0.3,
@@ -109,7 +109,8 @@ def generate_launch_description():
             'config': 'standard',
             'realRobot': 'false',
             'autonomyMode': 'true',
-            'twoWayDrive': 'false',
+            'twoWayDrive': 'true',
+            'waitForWaypoint': 'true',
             'maxSpeed': max_speed,
             'autonomySpeed': autonomy_speed,
             'sensorOffsetX': '0.0',
@@ -122,6 +123,7 @@ def generate_launch_description():
         declare_use_sim_time,
         declare_max_speed,
         declare_autonomy_speed,
+        SetParameter(name='use_sim_time', value=use_sim_time),
         cmu_sim_bridge_node,
         terrain_analysis_node,
         terrain_analysis_ext_launch,

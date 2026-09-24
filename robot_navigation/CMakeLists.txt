@@ -26,6 +26,7 @@ install(
     scripts/nav2/initial_pose_pub.py
     # CMU Autonomy scripts
     scripts/cmu/cmu_sim_bridge.py
+    scripts/cmu/lio_sam_cmu_bridge.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
